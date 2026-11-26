@@ -10,6 +10,7 @@ FG.paused = false;
 FG.lastFrame = 0;
 FG.accumulator = 0;
 FG.STEP = 1 / 60;
+FG.shake = 0; // camera shake after a touchdown or crash, decays per frame
 
 FG.resizeCanvas = function resizeCanvas() {
   const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -29,6 +30,9 @@ FG.paint = function paint() {
   ctx.fillStyle = '#0a0f1a';
   ctx.fillRect(0, 0, FG.canvas.width, FG.canvas.height);
   ctx.setTransform(scale, 0, 0, scale, ox, oy);
+  if (FG.shake > 0.01) {
+    ctx.translate((Math.random() - 0.5) * FG.shake * 9, (Math.random() - 0.5) * FG.shake * 9);
+  }
   try {
     FG.drawFrame(ctx, FG.state);
   } catch (err) {
@@ -77,11 +81,13 @@ FG.frame = function frame(now) {
     const input = FG.inputRead();
     const ringsBefore = s.ringsPassed;
     FG.stepWorld(s, dt, input);
+    if (s.status === 'landed' || s.status === 'crashed') FG.shake = 1;
     if (s.ringsPassed > ringsBefore) FG.audioRing();
     if (s.status === 'crashed') FG.audioCrash();
     if (s.status === 'landed') FG.audioLand();
     FG.audioEngine(s);
   }
+  if (FG.shake > 0) FG.shake = Math.max(0, FG.shake - dt * 1.6);
   FG.paint();
 };
 
@@ -124,14 +130,17 @@ FG.stageShot = function stageShot(name, seed) {
     s.rings.forEach((ring) => { ring.passed = true; });
     s.ringsPassed = FG.RING_COUNT;
     s.score = FG.RING_COUNT * FG.RING_POINTS;
+    s.scoreRings = FG.RING_COUNT * FG.RING_POINTS;
+    s.fuel = 55;
+    s.damage = 0;
     s.time = 85;
-    s.z = FG.RUNWAY_Z0 - 900;
+    s.z = FG.RUNWAY_Z0 - 500;
     s.x = 40;
-    s.alt = 480;
-    s.speed = 135;
-    s.throttle = 0.4;
+    s.alt = 220;
+    s.speed = 125;
+    s.throttle = 0.35;
     s.heading = -2;
-    for (let i = 0; i < 9 / step; i += 1) {
+    for (let i = 0; i < 5 / step; i += 1) {
       FG.stepWorld(s, step, FG.autopilot(s));
       if (s.status !== 'flying') break;
     }

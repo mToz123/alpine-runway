@@ -4,7 +4,10 @@
 // perspective projector with yaw / pitch / roll.
 
 FG.projector = function projector(s) {
-  const f = (FG.VIEW_H / 2) / Math.tan(FG.deg2rad(FG.FOV_DEG) / 2);
+  // Speed-based FOV kick: the view widens a touch at top speed.
+  const fov = FG.FOV_DEG
+    + FG.clamp((s.speed - FG.FOV_KICK_SPEED_KT) / 100, 0, 1) * FG.FOV_KICK_DEG;
+  const f = (FG.VIEW_H / 2) / Math.tan(FG.deg2rad(fov) / 2);
   const cx = FG.VIEW_W / 2;
   const pitchCam = s.pitch * 0.35;
   const yaw = FG.deg2rad(s.heading);
@@ -63,37 +66,56 @@ FG.ridgeNoise = function ridgeNoise(seed, t) {
 };
 
 FG.drawSky = function drawSky(ctx, s, project) {
+  // A proper vertical sunset all around: deep indigo overhead, violet,
+  // then a warm band at the horizon that fades into haze below it.
   const g = ctx.createLinearGradient(0, 0, 0, FG.VIEW_H);
   g.addColorStop(0, FG.SKY_TOP);
-  g.addColorStop(0.42, FG.SKY_MID);
+  g.addColorStop(0.3, FG.SKY_MID);
+  g.addColorStop(0.48, '#c96a8a');
   g.addColorStop(0.55, FG.SKY_HORIZON);
-  g.addColorStop(1, '#274028');
+  g.addColorStop(0.62, FG.SKY_HAZE);
+  g.addColorStop(1, '#3a2c26');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, FG.VIEW_W, FG.VIEW_H);
-  // Low sun ahead, slightly left.
-  const sun = project(s.x - 260, s.alt + 900, s.z + 6000);
-  if (sun) {
-    const glow = ctx.createRadialGradient(sun.x, sun.y, 4, sun.x, sun.y, 130);
-    glow.addColorStop(0, 'rgba(255,217,160,0.95)');
-    glow.addColorStop(0.35, 'rgba(255,170,90,0.55)');
-    glow.addColorStop(1, 'rgba(255,170,90,0)');
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(sun.x, sun.y, 130, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = FG.SUN_COLOR;
-    ctx.beginPath();
-    ctx.arc(sun.x, sun.y, 26, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  // Warm haze hugging the horizon.
+  const horizonY = FG.VIEW_H * 0.52 - ((FG.VIEW_H / 2) / Math.tan(FG.deg2rad(FG.FOV_DEG) / 2)) * Math.tan(FG.deg2rad(s.pitch * 0.35));
+  const haze = ctx.createLinearGradient(0, horizonY - 30, 0, horizonY + 40);
+  haze.addColorStop(0, 'rgba(255,179,122,0)');
+  haze.addColorStop(0.5, 'rgba(255,179,122,0.22)');
+  haze.addColorStop(1, 'rgba(255,179,122,0)');
+  ctx.fillStyle = haze;
+  ctx.fillRect(0, horizonY - 30, FG.VIEW_W, 70);
 };
 
-// Two far ridge silhouettes, parallaxed by heading.
+// The sun sits low ahead of the course and drifts with the heading, so
+// it is always the sunset the pilot flies into. Drawn after the ridges
+// so it clears their crests instead of hiding behind them.
+FG.drawSun = function drawSun(ctx, s) {
+  const horizonY = FG.VIEW_H * 0.52 - ((FG.VIEW_H / 2) / Math.tan(FG.deg2rad(FG.FOV_DEG) / 2)) * Math.tan(FG.deg2rad(s.pitch * 0.35));
+  const sunX = FG.VIEW_W / 2 - s.heading * 6;
+  const sunY = horizonY - 92;
+  const glow = ctx.createRadialGradient(sunX, sunY, 4, sunX, sunY, 170);
+  glow.addColorStop(0, 'rgba(255,217,160,0.9)');
+  glow.addColorStop(0.3, 'rgba(255,170,90,0.45)');
+  glow.addColorStop(1, 'rgba(255,170,90,0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(sunX, sunY, 170, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = FG.SUN_COLOR;
+  ctx.beginPath();
+  ctx.arc(sunX, sunY, 30, 0, Math.PI * 2);
+  ctx.fill();
+};
+
+// Two far ridge silhouettes, parallaxed by heading, each shaded from a
+// pale snow-lit crest down to a dark base so they read as mountains,
+// not flat cutouts.
 FG.drawRidges = function drawRidges(ctx, s) {
   const horizonY = FG.VIEW_H * 0.52 - ((FG.VIEW_H / 2) / Math.tan(FG.deg2rad(FG.FOV_DEG) / 2)) * Math.tan(FG.deg2rad(s.pitch * 0.35));
   const layers = [
-    { parallax: 0.12, base: 150, amp: 120, color: '#5d6f96' },
-    { parallax: 0.3, base: 90, amp: 170, color: '#3c4a68' },
+    { parallax: 0.12, base: 96, amp: 84, top: '#8a97b5', bottom: '#4a5878' },
+    { parallax: 0.3, base: 58, amp: 118, top: '#6d7c9e', bottom: '#2c3850' },
   ];
   ctx.save();
   ctx.translate(FG.VIEW_W / 2, horizonY);
@@ -101,7 +123,11 @@ FG.drawRidges = function drawRidges(ctx, s) {
   ctx.translate(-FG.VIEW_W / 2, -horizonY);
   for (let li = 0; li < layers.length; li += 1) {
     const L = layers[li];
-    ctx.fillStyle = L.color;
+    const grad = ctx.createLinearGradient(0, horizonY - L.base - L.amp, 0, horizonY + 2);
+    grad.addColorStop(0, L.top);
+    grad.addColorStop(0.55, L.bottom);
+    grad.addColorStop(1, L.bottom);
+    ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.moveTo(-40, horizonY + 2);
     for (let x = -40; x <= FG.VIEW_W + 40; x += 16) {
@@ -118,8 +144,11 @@ FG.drawRidges = function drawRidges(ctx, s) {
   ctx.restore();
 };
 
-// The valley floor as a projected grid of quads, far to near, with a
-// patchwork of fields, a river and fog toward the horizon.
+// The valley floor as a projected grid of quads, far to near: a patchwork
+// of real fields (not a checkerboard), a river with a sun glint, a dirt
+// road, tree clusters and a small town by the runway, all fogged toward
+// the horizon. Trees are collected per row and painted after the mesh so
+// they stand on the ground in the right order.
 FG.drawGround = function drawGround(ctx, s, project) {
   const rows = [];
   let z = s.z + 25;
@@ -131,6 +160,8 @@ FG.drawGround = function drawGround(ctx, s, project) {
   }
   const xs = [];
   for (let x = -880; x <= 880; x += 80) xs.push(x);
+  const fields = [FG.FIELD_A, FG.FIELD_B, FG.FIELD_WHEAT, FG.FIELD_PLOWED, FG.FIELD_MEADOW];
+  const trees = [];
   for (let ri = rows.length - 1; ri > 0; ri -= 1) {
     const z0 = rows[ri - 1];
     const z1 = rows[ri];
@@ -138,23 +169,35 @@ FG.drawGround = function drawGround(ctx, s, project) {
     for (let xi = 0; xi < xs.length - 1; xi += 1) {
       const x0 = xs[xi];
       const x1 = xs[xi + 1];
-      const p00 = project(x0, FG.terrainHeight(x0, z0), z0);
-      const p10 = project(x1, FG.terrainHeight(x1, z0), z0);
-      const p11 = project(x1, FG.terrainHeight(x1, z1), z1);
-      const p01 = project(x0, FG.terrainHeight(x0, z1), z1);
+      const h00 = FG.terrainHeight(x0, z0);
+      const h10 = FG.terrainHeight(x1, z0);
+      const h11 = FG.terrainHeight(x1, z1);
+      const h01 = FG.terrainHeight(x0, z1);
+      const p00 = project(x0, h00, z0);
+      const p10 = project(x1, h10, z0);
+      const p11 = project(x1, h11, z1);
+      const p01 = project(x0, h01, z1);
       if (!p00 || !p10 || !p11 || !p01) continue;
-      const midH = FG.terrainHeight((x0 + x1) / 2, (z0 + z1) / 2);
+      const midH = (h00 + h10 + h11 + h01) / 4;
       let color;
       if (midH > 1500) color = FG.SNOW;
-      else if (midH > 700) color = FG.hexLerp(FG.ROCK, FG.SNOW, (midH - 700) / 800);
+      else if (midH > 700) color = FG.hexLerp(FG.ROCK, FG.SNOW, FG.smoothstep(700, 1500, midH));
       else if (midH > 260) color = FG.hexLerp(FG.GRASS_DARK, FG.ROCK, (midH - 260) / 440);
       else {
-        const patch = (Math.floor(x0 / 80) + Math.floor(z0 / 80)) % 2 === 0;
-        color = patch ? FG.FIELD_A : FG.FIELD_B;
+        // Big field patches: the hash groups 2x2 cells into one field.
+        const fx = Math.floor(x0 / 160);
+        const fz = Math.floor(z0 / 160);
+        const fi = Math.floor(FG.ridgeNoise(s.seed, fx * 0.61 + fz * 0.37) * fields.length);
+        color = fields[fi];
       }
+      // Slope shading: steep faces fall into shadow, so the valley walls
+      // read as mountains instead of flat slabs.
+      const slope = Math.abs(h11 - h00) + Math.abs(h10 - h01);
+      const shade = FG.clamp(slope / 260, 0, 0.45);
+      color = FG.hexLerp(color, '#000000', shade);
       // A whisper of variation so the mesh never looks flat.
       const vary = FG.ridgeNoise(s.seed, Math.floor(x0 / 80) * 0.37 + Math.floor(z0 / 80) * 0.11) - 0.5;
-      color = FG.hexLerp(color, vary > 0 ? '#ffffff' : '#000000', Math.abs(vary) * 0.12);
+      color = FG.hexLerp(color, vary > 0 ? '#ffffff' : '#000000', Math.abs(vary) * 0.08);
       color = FG.hexLerp(color, FG.SKY_HORIZON, fog * 0.35);
       ctx.fillStyle = color;
       ctx.beginPath();
@@ -164,8 +207,18 @@ FG.drawGround = function drawGround(ctx, s, project) {
       ctx.lineTo(p01.x, p01.y);
       ctx.closePath();
       ctx.fill();
+      // Tree clusters on the valley floor, away from river, road and runway.
+      const cxm = (x0 + x1) / 2;
+      const czm = (z0 + z1) / 2;
+      const th = FG.ridgeNoise(s.seed + 5, Math.floor(cxm / 80) * 0.53 + Math.floor(czm / 80) * 0.29);
+      const nearRiver = Math.abs(cxm - FG.riverX(czm)) < 60;
+      const nearRoad = Math.abs(cxm - FG.roadX(czm)) < 40;
+      const nearRunway = czm > FG.RUNWAY_Z0 - 160 && czm < FG.RUNWAY_Z1 + 160 && Math.abs(cxm) < 140;
+      if (midH < 260 && th < 0.14 && !nearRiver && !nearRoad && !nearRunway) {
+        trees.push({ x: cxm, z: czm, h: FG.terrainHeight(cxm, czm), n: 2 + Math.floor(th * 40) });
+      }
     }
-    // River ribbon on this row.
+    // River ribbon on this row, with a bright sun glint down its middle.
     const rx = FG.riverX(z0);
     const r0 = project(rx - 14, FG.terrainHeight(rx, z0) + 2, z0);
     const r1 = project(rx + 14, FG.terrainHeight(rx, z0) + 2, z0);
@@ -180,7 +233,93 @@ FG.drawGround = function drawGround(ctx, s, project) {
       ctx.lineTo(r3.x, r3.y);
       ctx.closePath();
       ctx.fill();
+      const g0 = project(rx - 3, FG.terrainHeight(rx, z0) + 3, z0);
+      const g1 = project(rx + 3, FG.terrainHeight(rx, z0) + 3, z0);
+      const g2 = project(FG.riverX(z1) + 3, FG.terrainHeight(FG.riverX(z1), z1) + 3, z1);
+      const g3 = project(FG.riverX(z1) - 3, FG.terrainHeight(FG.riverX(z1), z1) + 3, z1);
+      if (g0 && g1 && g2 && g3) {
+        ctx.fillStyle = 'rgba(255,232,190,0.55)';
+        ctx.beginPath();
+        ctx.moveTo(g0.x, g0.y);
+        ctx.lineTo(g1.x, g1.y);
+        ctx.lineTo(g2.x, g2.y);
+        ctx.lineTo(g3.x, g3.y);
+        ctx.closePath();
+        ctx.fill();
+      }
     }
+    // Dirt road ribbon on this row.
+    const dx = FG.roadX(z0);
+    const d0 = project(dx - 7, FG.terrainHeight(dx, z0) + 2, z0);
+    const d1 = project(dx + 7, FG.terrainHeight(dx, z0) + 2, z0);
+    const d2 = project(FG.roadX(z1) + 7, FG.terrainHeight(FG.roadX(z1), z1) + 2, z1);
+    const d3 = project(FG.roadX(z1) - 7, FG.terrainHeight(FG.roadX(z1), z1) + 2, z1);
+    if (d0 && d1 && d2 && d3) {
+      ctx.fillStyle = FG.hexLerp(FG.ROAD_COLOR, FG.SKY_HORIZON, fog * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(d0.x, d0.y);
+      ctx.lineTo(d1.x, d1.y);
+      ctx.lineTo(d2.x, d2.y);
+      ctx.lineTo(d3.x, d3.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  // Trees, far to near, as small conifers standing on the ground.
+  for (let i = 0; i < trees.length; i += 1) {
+    const t = trees[i];
+    const p = project(t.x, t.h, t.z);
+    if (!p) continue;
+    const size = Math.max(2, p.scale * 14);
+    if (size > 60) continue;
+    for (let j = 0; j < t.n; j += 1) {
+      const off = (FG.ridgeNoise(s.seed + j, t.x * 0.13 + t.z * 0.07 + j) - 0.5) * size * 3;
+      const px = p.x + off;
+      const py = p.y;
+      const hgt = size * (0.8 + FG.ridgeNoise(s.seed + j + 3, t.x + j) * 0.6);
+      ctx.fillStyle = '#1d4a26';
+      ctx.beginPath();
+      ctx.moveTo(px, py - hgt);
+      ctx.lineTo(px - size * 0.45, py);
+      ctx.lineTo(px + size * 0.45, py);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#2e6b34';
+      ctx.beginPath();
+      ctx.moveTo(px, py - hgt);
+      ctx.lineTo(px - size * 0.28, py - hgt * 0.35);
+      ctx.lineTo(px + size * 0.28, py - hgt * 0.35);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+};
+
+// A small town by the runway: warm roofs and a few trees, so the landing
+// strip sits in a place that reads as somewhere, not nowhere.
+FG.drawTown = function drawTown(ctx, s, project) {
+  const rand = FG.mulberry32(s.seed * 7 + 3);
+  const roofs = ['#a34d2e', '#8a5a30', '#6e4a3a', '#b07a45', '#7d3b2e'];
+  for (let i = 0; i < 26; i += 1) {
+    const hx = -230 + rand() * 170;
+    const hz = 8560 + rand() * 380;
+    if (hz < s.z + 25 || hz > s.z + 3400) continue;
+    const hh = FG.terrainHeight(hx, hz);
+    const w = 9 + rand() * 7;
+    const d = 7 + rand() * 6;
+    const c1 = project(hx - w / 2, hh + 5, hz - d / 2);
+    const c2 = project(hx + w / 2, hh + 5, hz - d / 2);
+    const c3 = project(hx + w / 2, hh + 5, hz + d / 2);
+    const c4 = project(hx - w / 2, hh + 5, hz + d / 2);
+    if (!c1 || !c2 || !c3 || !c4) continue;
+    ctx.fillStyle = roofs[Math.floor(rand() * roofs.length)];
+    ctx.beginPath();
+    ctx.moveTo(c1.x, c1.y);
+    ctx.lineTo(c2.x, c2.y);
+    ctx.lineTo(c3.x, c3.y);
+    ctx.lineTo(c4.x, c4.y);
+    ctx.closePath();
+    ctx.fill();
   }
 };
 
@@ -287,62 +426,119 @@ FG.drawRings = function drawRings(ctx, s, project) {
 
 FG.drawClouds = function drawClouds(ctx, s, project) {
   const rand = FG.mulberry32(s.seed * 31 + 7);
-  for (let i = 0; i < 26; i += 1) {
-    const cx = (rand() - 0.5) * 2600;
-    const cy = 1800 + rand() * 1600;
-    const cz = s.z + 400 + rand() * 9000;
+  // Two layers: high thin streaks far away, and a few mid puffs. Long,
+  // flat and warm underneath — sunset clouds, not cotton blobs.
+  for (let i = 0; i < 14; i += 1) {
+    const high = i < 8;
+    const cx = (rand() - 0.5) * 3000;
+    const cy = high ? 2400 + rand() * 1400 : 1500 + rand() * 900;
+    const cz = s.z + 500 + rand() * 9000;
     const p = project(cx, cy, cz);
     if (!p || p.d < 100) continue;
-    const r = p.scale * 220;
+    const r = p.scale * (high ? 260 : 200);
     if (r < 4 || r > 700) continue;
-    // Soft sunset-lit puffs: radial gradients, never hard-edged.
-    const puffs = [
-      [0, 0, 1],
-      [-0.55, 0.1, 0.62],
-      [0.55, 0.08, 0.58],
-    ];
+    const stretch = high ? 2.6 : 1.7;
+    const alpha = high ? 0.4 : 0.55;
+    const puffs = high
+      ? [[0, 0, 1]]
+      : [[0, 0, 1], [-0.6, 0.12, 0.6], [0.6, 0.1, 0.55]];
     for (let j = 0; j < puffs.length; j += 1) {
       const px = p.x + puffs[j][0] * r;
       const py = p.y + puffs[j][1] * r;
       const pr = r * puffs[j][2];
       const g = ctx.createRadialGradient(px, py, pr * 0.1, px, py, pr);
-      g.addColorStop(0, 'rgba(255,244,230,0.85)');
-      g.addColorStop(0.7, 'rgba(255,236,220,0.45)');
+      g.addColorStop(0, `rgba(255,244,230,${alpha})`);
+      g.addColorStop(0.7, `rgba(255,236,220,${alpha * 0.5})`);
       g.addColorStop(1, 'rgba(255,236,220,0)');
       ctx.fillStyle = g;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.scale(stretch, 0.55);
       ctx.beginPath();
-      ctx.arc(px, py, pr, 0, Math.PI * 2);
+      ctx.arc(0, 0, pr, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
+      // Warm sunset light on the underside.
+      const warm = ctx.createRadialGradient(px, py + pr * 0.35, pr * 0.1, px, py + pr * 0.35, pr * 0.8);
+      warm.addColorStop(0, `rgba(255,170,110,${alpha * 0.5})`);
+      warm.addColorStop(1, 'rgba(255,170,110,0)');
+      ctx.fillStyle = warm;
+      ctx.save();
+      ctx.translate(px, py + pr * 0.35);
+      ctx.scale(stretch, 0.4);
+      ctx.beginPath();
+      ctx.arc(0, 0, pr * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
   }
 };
 
-// The chase-view aircraft, drawn in screen space, banked with the roll.
-// A compact jet seen from behind and slightly above: short foreshortened
-// fuselage, wide swept wings, tailplane and fin, lit canopy and nav lights.
-FG.drawPlane = function drawPlane(ctx, s) {
+// The plane's soft shadow on the terrain below, in screen space: the
+// ground under a chase-view camera sits below the aircraft in the frame,
+// so the shadow hangs under the plane — tight and dark near the ground,
+// wide and faint up high. It is what makes a landing readable.
+FG.drawPlaneShadow = function drawPlaneShadow(ctx, s) {
+  if (s.status !== 'flying' && s.status !== 'landed') return;
+  const ground = FG.terrainHeight(s.x, s.z);
+  const clearance = Math.max(0, s.alt - ground);
   const cx = FG.VIEW_W / 2 + s.roll * 1.1;
   const cy = FG.VIEW_H * 0.68 + s.pitch * 1.2;
+  const alpha = FG.clamp(0.34 - clearance / 4500, 0.05, 0.34);
+  const rx = 58 + clearance * 0.03;
+  const ry = rx * 0.42;
+  const sy = Math.min(FG.VIEW_H - 12, cy + 92 + clearance * 0.08);
+  ctx.fillStyle = `rgba(8,12,20,${alpha.toFixed(3)})`;
+  ctx.beginPath();
+  ctx.ellipse(cx + 24, sy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+};
+
+// The chase-view aircraft, drawn in screen space, banked with the roll.
+// A jet seen from behind and slightly above, built to look built: a
+// shaded fuselage with a specular stripe, wings whose underside shows
+// dark in a bank, lit canopy, engine glow and nav lights.
+FG.drawPlane = function drawPlane(ctx, s) {
+  const cx = FG.VIEW_W / 2 + s.roll * 1.1;
+  const cy = FG.VIEW_H * 0.68 + s.pitch * 1.2 + (s.status === 'title' ? 62 : 0);
   const blink = Math.floor(s.time * 2) % 2 === 0;
+  const downRight = s.roll > 8; // right wing is the low one in a right bank
+  const downLeft = s.roll < -8;
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(FG.deg2rad(s.roll * 0.85));
-  // Main wings: wide, swept back a touch, dark slate.
-  ctx.fillStyle = '#3d4a63';
-  ctx.beginPath();
-  ctx.moveTo(-12, -6);
-  ctx.lineTo(-152, 26);
-  ctx.lineTo(-146, 46);
-  ctx.lineTo(-10, 22);
-  ctx.closePath();
+  ctx.scale(FG.PLANE_SCALE, FG.PLANE_SCALE);
+  // Main wings: gradient from a lit root to a dark tip, swept back.
+  const wingL = ctx.createLinearGradient(0, 0, -152, 0);
+  wingL.addColorStop(0, '#5a6b8c');
+  wingL.addColorStop(1, '#2c3850');
+  const wingR = ctx.createLinearGradient(0, 0, 152, 0);
+  wingR.addColorStop(0, '#5a6b8c');
+  wingR.addColorStop(1, '#2c3850');
+  const wingPath = (side) => {
+    ctx.beginPath();
+    ctx.moveTo(side * 12, -6);
+    ctx.lineTo(side * 152, 26);
+    ctx.lineTo(side * 146, 46);
+    ctx.lineTo(side * 10, 22);
+    ctx.closePath();
+  };
+  ctx.fillStyle = wingL;
+  wingPath(-1);
   ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(12, -6);
-  ctx.lineTo(152, 26);
-  ctx.lineTo(146, 46);
-  ctx.lineTo(10, 22);
-  ctx.closePath();
+  ctx.fillStyle = wingR;
+  wingPath(1);
   ctx.fill();
+  // The low wing shows its underside: dark, so a bank reads at a glance.
+  ctx.fillStyle = 'rgba(8,14,26,0.5)';
+  if (downLeft) {
+    wingPath(-1);
+    ctx.fill();
+  }
+  if (downRight) {
+    wingPath(1);
+    ctx.fill();
+  }
   // Tailplane.
   ctx.fillStyle = '#2e3a50';
   ctx.beginPath();
@@ -356,18 +552,21 @@ FG.drawPlane = function drawPlane(ctx, s) {
   ctx.closePath();
   ctx.fill();
   // Fin, seen edge-on above the tail.
-  ctx.fillStyle = '#46587a';
+  const fin = ctx.createLinearGradient(0, 4, 0, 40);
+  fin.addColorStop(0, '#5a6b8c');
+  fin.addColorStop(1, '#2e3a50');
+  ctx.fillStyle = fin;
   ctx.beginPath();
   ctx.moveTo(-8, 40);
   ctx.lineTo(0, 4);
   ctx.lineTo(8, 40);
   ctx.closePath();
   ctx.fill();
-  // Fuselage: short and tapered, nose away from the viewer.
-  const body = ctx.createLinearGradient(-14, 0, 14, 0);
-  body.addColorStop(0, '#8fa3c4');
-  body.addColorStop(0.5, '#e8eef7');
-  body.addColorStop(1, '#7c8dab');
+  // Fuselage: shaded top to bottom, nose away from the viewer.
+  const body = ctx.createLinearGradient(0, -62, 0, 60);
+  body.addColorStop(0, '#f2f6fb');
+  body.addColorStop(0.45, '#c9d6e8');
+  body.addColorStop(1, '#6f7f9e');
   ctx.fillStyle = body;
   ctx.beginPath();
   ctx.moveTo(0, -62);
@@ -379,12 +578,20 @@ FG.drawPlane = function drawPlane(ctx, s) {
   ctx.quadraticCurveTo(-13, -44, 0, -62);
   ctx.closePath();
   ctx.fill();
-  // Canopy.
-  ctx.fillStyle = '#101c2e';
+  // Specular stripe down the sunlit side of the fuselage.
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.beginPath();
+  ctx.ellipse(-5, -14, 3.5, 26, 0.06, 0, Math.PI * 2);
+  ctx.fill();
+  // Canopy: dark glass with a bright glint.
+  const canopy = ctx.createLinearGradient(-8, -48, 8, -14);
+  canopy.addColorStop(0, '#2c4a6b');
+  canopy.addColorStop(1, '#0c1626');
+  ctx.fillStyle = canopy;
   ctx.beginPath();
   ctx.ellipse(0, -30, 8, 17, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = 'rgba(160,220,255,0.75)';
+  ctx.fillStyle = 'rgba(180,225,255,0.85)';
   ctx.beginPath();
   ctx.ellipse(-3, -36, 3, 8, 0.2, 0, Math.PI * 2);
   ctx.fill();
@@ -422,6 +629,14 @@ FG.panel = function panel(ctx, x, y, w, h) {
   ctx.roundRect(x, y, w, h, 8);
   ctx.fill();
   ctx.stroke();
+  // Glass: a soft highlight across the top of the panel.
+  const sheen = ctx.createLinearGradient(x, y, x, y + h * 0.45);
+  sheen.addColorStop(0, 'rgba(255,255,255,0.10)');
+  sheen.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sheen;
+  ctx.beginPath();
+  ctx.roundRect(x + 1, y + 1, w - 2, h * 0.45, 7);
+  ctx.fill();
 };
 
 FG.text = function text(ctx, str, x, y, size, color, align, weight) {
@@ -445,17 +660,18 @@ FG.drawHUD = function drawHUD(ctx, s) {
   FG.text(ctx, `${FG.pad(s.alt, 5)} FT`, 34, 66, 26, '#ffffff');
   FG.text(ctx, 'SPD', 34, 96, 15, FG.HUD_CYAN);
   FG.text(ctx, `${FG.pad(s.speed, 3)} KT`, 118, 96, 20, '#ffffff');
-  // Top-centre: compass tape.
-  FG.panel(ctx, W / 2 - 190, 16, 380, 56);
+  // Top-centre: compass tape on the left, current heading on the right.
+  FG.panel(ctx, W / 2 - 220, 16, 440, 56);
   const hdg = ((s.heading % 360) + 360) % 360;
+  const tapeCx = W / 2 - 60;
   ctx.save();
   ctx.beginPath();
-  ctx.rect(W / 2 - 190, 16, 380, 56);
+  ctx.rect(W / 2 - 220, 16, 320, 56);
   ctx.clip();
   for (let d = -45; d <= 45; d += 5) {
     const deg = Math.round((hdg + d) / 5) * 5;
     const off = (deg - hdg) * 3.2;
-    const x = W / 2 + off;
+    const x = tapeCx + off;
     const major = deg % 15 === 0;
     ctx.strokeStyle = major ? '#ffffff' : 'rgba(255,255,255,0.5)';
     ctx.lineWidth = major ? 2 : 1;
@@ -466,66 +682,103 @@ FG.drawHUD = function drawHUD(ctx, s) {
     if (major) FG.text(ctx, FG.pad(((deg % 360) + 360) % 360, 3), x, 58, 12, FG.HUD_CYAN, 'center');
   }
   ctx.restore();
-  FG.text(ctx, 'HDG', W / 2 - 178, 30, 13, FG.HUD_CYAN);
-  FG.text(ctx, `${FG.pad(hdg, 3)}°`, W / 2 + 148, 44, 18, '#ffffff', 'right');
+  ctx.strokeStyle = 'rgba(143,245,255,0.35)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(W / 2 + 100, 24);
+  ctx.lineTo(W / 2 + 100, 64);
+  ctx.stroke();
+  FG.text(ctx, 'HDG', W / 2 + 118, 30, 13, FG.HUD_CYAN);
+  FG.text(ctx, `${FG.pad(hdg, 3)}°`, W / 2 + 160, 50, 22, '#ffffff', 'center');
   ctx.fillStyle = FG.HUD_AMBER;
   ctx.beginPath();
-  ctx.moveTo(W / 2 - 7, 18);
-  ctx.lineTo(W / 2 + 7, 18);
-  ctx.lineTo(W / 2, 30);
+  ctx.moveTo(tapeCx - 7, 18);
+  ctx.lineTo(tapeCx + 7, 18);
+  ctx.lineTo(tapeCx, 30);
   ctx.closePath();
   ctx.fill();
-  // Top-right: throttle + score.
-  FG.panel(ctx, W - 236, 16, 218, 108);
+  // Top-right: throttle + fuel + damage + score.
+  FG.panel(ctx, W - 236, 16, 218, 190);
   FG.text(ctx, 'THR', W - 220, 38, 15, FG.HUD_CYAN);
   ctx.fillStyle = 'rgba(255,255,255,0.18)';
   ctx.fillRect(W - 220, 52, 186, 12);
   ctx.fillStyle = s.throttle > 0.85 ? FG.HUD_RED : FG.HUD_GREEN;
   ctx.fillRect(W - 220, 52, 186 * s.throttle, 12);
   FG.text(ctx, `${Math.round(s.throttle * 100)}%`, W - 220, 82, 16, '#ffffff');
-  FG.text(ctx, 'SCORE', W - 220, 106, 15, FG.HUD_CYAN);
-  FG.text(ctx, String(s.score), W - 148, 106, 20, '#ffffff');
-  // Bottom-left: attitude indicator (lit instruments).
-  const ax = 78;
-  const ay = H - 78;
+  FG.text(ctx, 'FUEL', W - 220, 104, 15, FG.HUD_CYAN);
+  FG.text(ctx, `${Math.round(s.fuel)}%`, W - 148, 104, 16, s.fuel < FG.FUEL_LOW ? FG.HUD_RED : '#ffffff');
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.fillRect(W - 220, 116, 186, 10);
+  ctx.fillStyle = s.fuel < FG.FUEL_LOW ? FG.HUD_RED : s.fuel < 50 ? FG.HUD_AMBER : FG.HUD_GREEN;
+  ctx.fillRect(W - 220, 116, 186 * FG.clamp(s.fuel / 100, 0, 1), 10);
+  FG.text(ctx, 'DMG', W - 220, 146, 15, FG.HUD_CYAN);
+  FG.text(ctx, `${Math.round(s.damage)}%`, W - 148, 146, 16, s.damage > 70 ? FG.HUD_RED : '#ffffff');
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.fillRect(W - 220, 158, 186, 10);
+  ctx.fillStyle = s.damage > 70 ? FG.HUD_RED : s.damage > 30 ? FG.HUD_AMBER : FG.HUD_GREEN;
+  ctx.fillRect(W - 220, 158, 186 * FG.clamp(s.damage / 100, 0, 1), 10);
+  FG.text(ctx, 'SCORE', W - 220, 188, 15, FG.HUD_CYAN);
+  FG.text(ctx, String(s.score), W - 148, 188, 20, '#ffffff');
+  // Bottom-left: attitude indicator (lit instruments), bigger, with a
+  // pitch ladder and a glass dome.
+  const ax = 86;
+  const ay = H - 94;
+  const ar = 70;
   ctx.save();
   ctx.beginPath();
-  ctx.arc(ax, ay, 56, 0, Math.PI * 2);
+  ctx.arc(ax, ay, ar, 0, Math.PI * 2);
   ctx.clip();
   ctx.fillStyle = '#274b7a';
-  ctx.fillRect(ax - 56, ay - 56, 112, 112);
+  ctx.fillRect(ax - ar, ay - ar, ar * 2, ar * 2);
   ctx.save();
   ctx.translate(ax, ay);
   ctx.rotate(FG.deg2rad(-s.roll));
-  ctx.translate(0, FG.clamp(s.pitch, -20, 20) * 1.6);
+  ctx.translate(0, FG.clamp(s.pitch, -20, 20) * 2.1);
   ctx.fillStyle = '#274b7a';
-  ctx.fillRect(-60, -60, 120, 60);
+  ctx.fillRect(-ar - 10, -ar - 10, (ar + 10) * 2, ar + 10);
   ctx.fillStyle = '#7a5a2e';
-  ctx.fillRect(-60, 0, 120, 60);
+  ctx.fillRect(-ar - 10, 0, (ar + 10) * 2, ar + 10);
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(-60, 0);
-  ctx.lineTo(60, 0);
+  ctx.moveTo(-ar - 10, 0);
+  ctx.lineTo(ar + 10, 0);
   ctx.stroke();
+  // Pitch ladder: 10° and 20° rungs above and below the horizon.
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+  [-20, -10, 10, 20].forEach((deg) => {
+    const y = -deg * 2.1;
+    const half = deg % 20 === 0 ? 26 : 16;
+    ctx.beginPath();
+    ctx.moveTo(-half, y);
+    ctx.lineTo(half, y);
+    ctx.stroke();
+  });
   ctx.restore();
   ctx.strokeStyle = FG.HUD_AMBER;
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(ax - 26, ay);
-  ctx.lineTo(ax - 8, ay);
-  ctx.moveTo(ax + 8, ay);
-  ctx.lineTo(ax + 26, ay);
+  ctx.moveTo(ax - 32, ay);
+  ctx.lineTo(ax - 10, ay);
+  ctx.moveTo(ax + 10, ay);
+  ctx.lineTo(ax + 32, ay);
   ctx.beginPath();
-  ctx.arc(ax, ay + 4, 5, 0, Math.PI * 2);
+  ctx.arc(ax, ay + 5, 6, 0, Math.PI * 2);
   ctx.stroke();
+  // Glass dome: light falling across the top of the instrument.
+  const dome = ctx.createRadialGradient(ax - 24, ay - 26, 4, ax - 24, ay - 26, ar * 1.2);
+  dome.addColorStop(0, 'rgba(255,255,255,0.22)');
+  dome.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = dome;
+  ctx.fillRect(ax - ar, ay - ar, ar * 2, ar * 2);
   ctx.restore();
   ctx.strokeStyle = 'rgba(143,245,255,0.6)';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(ax, ay, 56, 0, Math.PI * 2);
+  ctx.arc(ax, ay, ar, 0, Math.PI * 2);
   ctx.stroke();
-  FG.text(ctx, 'ATT', ax, ay + 72, 12, FG.HUD_CYAN, 'center');
+  FG.text(ctx, 'ATT', ax, ay + ar + 16, 12, FG.HUD_CYAN, 'center');
   // Bottom-right: rings + time.
   FG.panel(ctx, W - 236, H - 96, 218, 78);
   FG.text(ctx, 'RINGS', W - 220, H - 74, 15, FG.HUD_CYAN);
@@ -534,8 +787,9 @@ FG.drawHUD = function drawHUD(ctx, s) {
   const secs = Math.floor(s.time % 60);
   FG.text(ctx, 'TIME', W - 220, H - 42, 15, FG.HUD_CYAN);
   FG.text(ctx, `${FG.pad(mins, 2)}:${FG.pad(secs, 2)}`, W - 148, H - 42, 20, '#ffffff');
-  // Next-target readout + edge chevron.
-  const target = FG.nextTarget(s);
+  // Next-target readout + edge chevron, only while flying.
+  if (s.status === 'flying') {
+    const target = FG.nextTarget(s);
   const project = FG.projector(s);
   const tp = project(target.x, target.y, target.z);
   const distM = Math.max(0, Math.round(target.z - s.z));
@@ -580,19 +834,57 @@ FG.drawHUD = function drawHUD(ctx, s) {
     target.ring ? FG.HUD_CYAN : FG.HUD_GREEN,
     'center',
   );
+  }
   // Flash message.
   if (s.flash > 0 || s.time < s.messageUntil) {
     ctx.globalAlpha = FG.clamp(s.flash * 1.4, 0.25, 1);
     FG.text(ctx, s.message, W / 2, H * 0.3, 34, FG.HUD_AMBER, 'center');
     ctx.globalAlpha = 1;
   }
-  // Warnings.
-  if (s.stall && s.status === 'flying') {
-    const on = Math.floor(s.time * 4) % 2 === 0;
-    if (on) FG.text(ctx, '!! STALL — NOSE DOWN, THROTTLE UP !!', W / 2, 96, 22, FG.HUD_RED, 'center');
-  } else if (s.terrainWarn && s.status === 'flying') {
-    FG.text(ctx, 'TERRAIN — PULL UP', W / 2, 96, 22, FG.HUD_AMBER, 'center');
+  // Warnings, most urgent first.
+  if (s.status === 'flying') {
+    const blink = Math.floor(s.time * 4) % 2 === 0;
+    if (s.speed > FG.OVERSPEED_KT && blink) {
+      FG.text(ctx, '!! OVERSPEED — AIRFRAME TAKING DAMAGE !!', W / 2, 96, 22, FG.HUD_RED, 'center');
+    } else if (s.damage > 70 && blink) {
+      FG.text(ctx, '!! DAMAGE CRITICAL !!', W / 2, 96, 22, FG.HUD_RED, 'center');
+    } else if (s.fuelOut) {
+      FG.text(ctx, 'FUEL OUT — ENGINE DEAD, GLIDE TO THE RUNWAY', W / 2, 96, 22, FG.HUD_RED, 'center');
+    } else if (s.fuel < FG.FUEL_LOW) {
+      FG.text(ctx, 'FUEL LOW — RINGS REFUEL +3%', W / 2, 96, 22, FG.HUD_AMBER, 'center');
+    } else if (s.stall && blink) {
+      FG.text(ctx, '!! STALL — NOSE DOWN, THROTTLE UP !!', W / 2, 96, 22, FG.HUD_RED, 'center');
+    } else if (s.terrainWarn) {
+      FG.text(ctx, 'TERRAIN — PULL UP', W / 2, 96, 22, FG.HUD_AMBER, 'center');
+    }
   }
+};
+
+// Speed lines at high throttle: faint streaks near the screen edges,
+// so speed is felt as well as read.
+FG.drawSpeedLines = function drawSpeedLines(ctx, s) {
+  if (s.status !== 'flying' || s.speed < FG.SPEED_LINES_KT) return;
+  const strength = FG.clamp((s.speed - FG.SPEED_LINES_KT) / 55, 0, 1);
+  const cx = FG.VIEW_W / 2;
+  const cy = FG.VIEW_H * 0.52;
+  ctx.save();
+  ctx.strokeStyle = `rgba(255,255,255,${(0.28 * strength).toFixed(3)})`;
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 12; i += 1) {
+    const seed = i * 97 + Math.floor(s.time * 24);
+    const ang = FG.ridgeNoise(s.seed, seed * 0.31) * Math.PI * 2;
+    const r0 = 330 + FG.ridgeNoise(s.seed + 1, seed * 0.17) * 180;
+    const len = 26 + FG.ridgeNoise(s.seed + 2, seed * 0.23) * 60 * strength;
+    const x0 = cx + Math.cos(ang) * r0;
+    const y0 = cy + Math.sin(ang) * r0 * 0.7;
+    const x1 = cx + Math.cos(ang) * (r0 + len);
+    const y1 = cy + Math.sin(ang) * (r0 + len) * 0.7;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
+  ctx.restore();
 };
 
 // Full frame: world then HUD, plus the title / end screens.
@@ -600,15 +892,19 @@ FG.drawFrame = function drawFrame(ctx, s) {
   const project = FG.projector(s);
   FG.drawSky(ctx, s, project);
   FG.drawRidges(ctx, s);
+  FG.drawSun(ctx, s);
   FG.drawGround(ctx, s, project);
+  FG.drawTown(ctx, s, project);
   FG.drawRunway(ctx, s, project);
   FG.drawClouds(ctx, s, project);
   FG.drawRings(ctx, s, project);
+  FG.drawPlaneShadow(ctx, s);
+  FG.drawSpeedLines(ctx, s);
   FG.drawPlane(ctx, s);
   FG.drawHUD(ctx, s);
   if (s.status === 'title') FG.drawTitle(ctx, s);
   else if (s.status === 'crashed') FG.drawEnd(ctx, s, 'CRASHED', s.statusReason, FG.HUD_RED);
-  else if (s.status === 'landed') FG.drawEnd(ctx, s, 'TOUCHDOWN!', `RUNWAY LANDING  +${FG.LANDING_POINTS} PTS`, FG.HUD_GREEN);
+  else if (s.status === 'landed') FG.drawEnd(ctx, s, s.statusReason === 'HARD LANDING — AIRFRAME DAMAGED' ? 'HARD LANDING' : 'TOUCHDOWN!', s.statusReason, FG.HUD_GREEN);
   else if (s.status === 'done') FG.drawEnd(ctx, s, s.statusReason, 'PRESS R TO FLY AGAIN', FG.HUD_CYAN);
 };
 
@@ -623,20 +919,38 @@ FG.drawTitle = function drawTitle(ctx, s) {
   FG.text(ctx, 'ARROWS / WASD — PITCH & BANK      MOUSE — STEER', W / 2, H * 0.46 + 34, 18, '#ffffff', 'center');
   FG.text(ctx, 'SHIFT / CTRL — THROTTLE UP / DOWN      WHEEL — THROTTLE', W / 2, H * 0.46 + 66, 18, '#ffffff', 'center');
   FG.text(ctx, 'R — RESTART      P — PAUSE      M — SOUND', W / 2, H * 0.46 + 98, 18, '#ffffff', 'center');
-  FG.text(ctx, 'FLY THROUGH EVERY RING, THEN SET HER DOWN GENTLY', W / 2, H * 0.46 + 128, 16, FG.HUD_CYAN, 'center');
+  FG.text(ctx, 'RINGS REFUEL +3%  •  FUEL LEFT PAYS A BONUS  •  OVER 235 KT HURTS', W / 2, H * 0.46 + 128, 16, FG.HUD_CYAN, 'center');
   const pulse = 0.65 + 0.35 * Math.sin(s.time * 4);
   ctx.globalAlpha = pulse;
-  FG.text(ctx, 'PRESS ENTER OR CLICK TO FLY', W / 2, H * 0.78, 26, '#ffffff', 'center');
+  FG.text(ctx, 'PRESS ENTER OR CLICK TO FLY', W / 2, H * 0.92, 26, '#ffffff', 'center');
   ctx.globalAlpha = 1;
 };
 
+// The end card says what happened: the reason, the score broken down so
+// every decision is visible, and the restart prompt.
 FG.drawEnd = function drawEnd(ctx, s, title, sub, color) {
   const W = FG.VIEW_W;
   const H = FG.VIEW_H;
   ctx.fillStyle = 'rgba(6,12,24,0.55)';
   ctx.fillRect(0, 0, W, H);
-  FG.text(ctx, title, W / 2, H * 0.36, 56, color, 'center');
-  FG.text(ctx, sub, W / 2, H * 0.36 + 48, 20, '#ffffff', 'center');
-  FG.text(ctx, `SCORE ${s.score}   •   RINGS ${s.ringsPassed}/${FG.RING_COUNT}   •   TIME ${FG.pad(Math.floor(s.time / 60), 2)}:${FG.pad(Math.floor(s.time % 60), 2)}`, W / 2, H * 0.52, 22, FG.HUD_CYAN, 'center');
-  FG.text(ctx, 'PRESS R TO FLY AGAIN', W / 2, H * 0.66, 24, '#ffffff', 'center');
+  FG.text(ctx, title, W / 2, H * 0.26, 56, color, 'center');
+  FG.text(ctx, sub, W / 2, H * 0.26 + 46, 20, '#ffffff', 'center');
+  FG.panel(ctx, W / 2 - 250, H * 0.38, 500, 210);
+  const rows = [
+    ['RINGS', `${s.ringsPassed} × ${FG.RING_POINTS}`, `+${s.scoreRings}`],
+    ['CLOSE PASSES', '', `+${s.scoreClose}`],
+    ['LANDING', '', `+${s.scoreLanding}`],
+    ['FUEL BONUS', `${Math.round(s.fuel)}% LEFT`, `+${s.scoreFuel}`],
+    ['DAMAGE', `${Math.round(s.damage)}%`, ''],
+  ];
+  let y = H * 0.38 + 28;
+  rows.forEach((row) => {
+    FG.text(ctx, row[0], W / 2 - 226, y, 16, FG.HUD_CYAN);
+    FG.text(ctx, row[1], W / 2 - 40, y, 16, '#ffffff', 'right');
+    FG.text(ctx, row[2], W / 2 + 226, y, 16, '#ffffff', 'right');
+    y += 30;
+  });
+  FG.text(ctx, `TOTAL  ${s.score}`, W / 2, H * 0.38 + 28 + 30 * 5 + 6, 24, FG.HUD_AMBER, 'center');
+  FG.text(ctx, `TIME ${FG.pad(Math.floor(s.time / 60), 2)}:${FG.pad(Math.floor(s.time % 60), 2)}`, W / 2, H * 0.72, 20, FG.HUD_CYAN, 'center');
+  FG.text(ctx, 'PRESS R TO FLY AGAIN', W / 2, H * 0.8, 24, '#ffffff', 'center');
 };

@@ -35,6 +35,11 @@ FG.riverX = function riverX(z) {
   return 130 * Math.sin(z * 0.0006) + 60 * Math.sin(z * 0.0017 + 1.3);
 };
 
+// A dirt road winds the other side of the valley, past the town.
+FG.roadX = function roadX(z) {
+  return -180 + 90 * Math.sin(z * 0.0009 + 2.0) + 40 * Math.sin(z * 0.0021 + 0.6);
+};
+
 // Terrain height in feet at world (x metres, z metres). The valley floor
 // rolls gently; the walls rise steeply past |x| = 420m into snowy peaks.
 FG.terrainHeight = function terrainHeight(x, z) {
@@ -88,7 +93,15 @@ FG.newState = function newState(seed) {
     speed: FG.START_SPEED_KT,
     throttle: 0.62,
     score: 0,
+    scoreRings: 0, // points from rings flown through
+    scoreClose: 0, // points from close passes
+    scoreLanding: 0, // points from the touchdown
+    scoreFuel: 0, // landing fuel bonus
     ringsPassed: 0,
+    fuel: FG.FUEL_START,
+    damage: 0,
+    fuelOut: false,
+    vs: 0, // vertical speed, ft/s (negative = descending)
     time: 0,
     status: 'title', // title | flying | crashed | landed | done
     statusReason: '',
@@ -107,11 +120,30 @@ FG.stepWorld = function stepWorld(s, dt, input) {
   if (s.status !== 'flying') return;
   s.time += dt;
 
-  // Throttle and speed.
-  s.throttle = FG.clamp(s.throttle + input.throttle * FG.THROTTLE_RATE * dt, 0, 1);
-  const targetSpeed = FG.MIN_SPEED_KT + s.throttle * (FG.MAX_SPEED_KT - FG.MIN_SPEED_KT);
+  // Throttle and speed. Empty tank = engine out: the throttle is forced
+  // to idle and the wing glides at minimum speed toward the runway.
+  if (s.fuel <= 0) {
+    s.fuelOut = true;
+    s.throttle = 0;
+  }
+  if (!s.fuelOut) {
+    s.throttle = FG.clamp(s.throttle + input.throttle * FG.THROTTLE_RATE * dt, 0, 1);
+    s.fuel = Math.max(
+      0,
+      s.fuel - (FG.FUEL_IDLE_BURN + s.throttle * FG.FUEL_THROTTLE_BURN) * dt,
+    );
+    if (s.fuel <= 0) s.fuelOut = true;
+  }
+  const targetSpeed = s.fuelOut
+    ? FG.MIN_SPEED_KT
+    : FG.MIN_SPEED_KT + s.throttle * (FG.MAX_SPEED_KT - FG.MIN_SPEED_KT);
   s.speed += (targetSpeed - s.speed) * FG.SPEED_LERP * dt;
   s.stall = s.speed < FG.STALL_SPEED_KT;
+
+  // Overspeed hurts the airframe.
+  if (s.speed > FG.OVERSPEED_KT) {
+    s.damage = Math.min(100, s.damage + FG.DAMAGE_OVERSPEED_RATE * dt);
+  }
 
   // Pitch and roll. Roll levels itself when the stick is centred.
   const pitchAuthority = s.stall ? 0.4 : 1;
@@ -143,12 +175,24 @@ FG.stepWorld = function stepWorld(s, dt, input) {
   let vs = speedFps * Math.sin(pitchRad);
   if (s.stall) vs -= FG.STALL_SINK_FPS;
   if (s.pitch < 0) vs *= 1.15; // dives bite a little harder
+  s.vs = vs;
   s.alt += vs * dt;
   if (s.alt > FG.CEILING_FT) s.alt = FG.CEILING_FT;
 
-  // Terrain warning when close to the ground.
+  // Terrain warning when close to the ground — but not on final, where
+  // being low over the runway corridor is the whole point of landing.
   const ground = FG.terrainHeight(s.x, s.z);
-  s.terrainWarn = s.alt - ground < 120 && s.alt - ground > 0;
+  const onFinal = Math.abs(s.x) <= FG.RUNWAY_HALF_W + 6
+    && s.z >= FG.RUNWAY_Z0 - 400 && s.z <= FG.RUNWAY_Z1;
+  s.terrainWarn = !onFinal && s.alt - ground < 120 && s.alt - ground > 0;
+  if (!onFinal && s.alt - ground < FG.SCRAPE_CLEARANCE_FT && s.speed > 120) {
+    s.damage = Math.min(100, s.damage + FG.DAMAGE_SCRAPE_RATE * dt);
+  }
+  if (s.damage >= 100) {
+    s.status = 'crashed';
+    s.statusReason = s.speed > FG.OVERSPEED_KT ? 'OVERSPEED — AIRFRAME FAILURE' : 'AIRFRAME FAILURE';
+    return;
+  }
 
   // Rings: crossing a ring's z-plane inside its circle scores.
   const prevZ = s.z - speedMps * Math.cos(pitchRad) * Math.cos(headingRad) * dt;
@@ -163,12 +207,15 @@ FG.stepWorld = function stepWorld(s, dt, input) {
         ring.passed = true;
         s.ringsPassed += 1;
         s.score += FG.RING_POINTS;
+        s.scoreRings += FG.RING_POINTS;
+        s.fuel = Math.min(FG.FUEL_MAX, s.fuel + FG.FUEL_RING_BONUS);
         s.flash = 0.9;
-        s.message = `RING ${s.ringsPassed}/${FG.RING_COUNT}  +${FG.RING_POINTS}`;
+        s.message = `RING ${s.ringsPassed}/${FG.RING_COUNT}  +${FG.RING_POINTS}   FUEL +${FG.FUEL_RING_BONUS}%`;
         s.messageUntil = s.time + 1.6;
       } else if (d < ring.r * 1.6) {
         ring.close = true;
         s.score += FG.CLOSE_POINTS;
+        s.scoreClose += FG.CLOSE_POINTS;
         s.message = `CLOSE!  +${FG.CLOSE_POINTS}`;
         s.messageUntil = s.time + 1.2;
       }
@@ -182,8 +229,19 @@ FG.stepWorld = function stepWorld(s, dt, input) {
   if (onRunway && s.alt - FG.RUNWAY_ELEV_FT <= 6 && s.speed < 135
     && Math.abs(s.heading) < 12 && Math.abs(s.roll) < 18) {
     s.status = 'landed';
-    s.score += FG.LANDING_POINTS;
-    s.message = `TOUCHDOWN  +${FG.LANDING_POINTS}`;
+    const hard = s.vs < FG.HARD_LANDING_VS_FPS || s.speed > 130 || Math.abs(s.roll) > 12;
+    s.scoreLanding = hard ? FG.LANDING_POINTS_HARD : FG.LANDING_POINTS;
+    s.score += s.scoreLanding;
+    if (hard) {
+      s.damage = Math.min(100, s.damage + FG.HARD_LANDING_DAMAGE);
+      s.statusReason = 'HARD LANDING — AIRFRAME DAMAGED';
+    } else {
+      s.statusReason = 'LANDED CLEAN';
+    }
+    // Fuel left is worth points: throttle discipline pays.
+    s.scoreFuel = Math.round(s.fuel * FG.FUEL_BONUS_PER_POINT);
+    s.score += s.scoreFuel;
+    s.message = `TOUCHDOWN  +${s.scoreLanding}`;
     s.messageUntil = s.time + 3;
     return;
   }
@@ -191,7 +249,8 @@ FG.stepWorld = function stepWorld(s, dt, input) {
   // Crash: terrain, or out of the valley.
   if (s.alt <= ground + 4) {
     s.status = 'crashed';
-    s.statusReason = onRunway ? 'TOO FAST TO LAND' : 'TERRAIN IMPACT';
+    if (s.fuelOut) s.statusReason = 'FUEL OUT — ENGINE DEAD';
+    else s.statusReason = onRunway ? 'TOO FAST TO LAND' : 'TERRAIN IMPACT';
     return;
   }
   if (Math.abs(s.x) > 1150) {
@@ -224,13 +283,24 @@ FG.autopilot = function autopilot(s) {
   if (headingErr > 180) headingErr -= 360;
   if (headingErr < -180) headingErr += 360;
   const wantRoll = FG.clamp(headingErr * 2.2, -1, 1);
-  // Rings: aim just above the ring. Runway: hold 170 ft until over the
-  // threshold (the ground before it is higher), then descend onto the deck.
+  // Rings: aim just above the ring. Runway: hold 170 ft until 500 m out,
+  // glide down to 100 ft at the threshold (20 ft above the 80 ft deck),
+  // then flare — ease the nose up so the sink bleeds off before the
+  // wheels touch. Altitudes are absolute: the runway deck is 80 ft up.
   const wantAlt = target.ring
     ? target.y + 40
-    : s.z > FG.RUNWAY_Z0 + 30 ? FG.RUNWAY_ELEV_FT + 4 : 170;
+    : s.z < FG.RUNWAY_Z0 - 500
+      ? 170
+      : s.z < FG.RUNWAY_Z0
+        ? 170 - (s.z - (FG.RUNWAY_Z0 - 500)) * 0.14
+        : FG.RUNWAY_ELEV_FT + 4;
   const altErr = wantAlt - s.alt;
-  const wantPitch = FG.clamp(altErr * 0.02, -0.8, 0.8);
+  let wantPitch = FG.clamp(altErr * 0.02, -0.8, 0.8);
+  if (!target.ring && s.z >= FG.RUNWAY_Z0 && s.alt - FG.RUNWAY_ELEV_FT < 28) {
+    // Flare: close to the deck, never dive and never climb — ease down
+    // at a sink the wheels can take.
+    wantPitch = FG.clamp(wantPitch, -0.12, 0.1);
+  }
   let throttle = 0;
   if (target.ring) throttle = s.speed < 150 ? 0.6 : s.speed > 190 ? -0.6 : 0;
   else throttle = s.speed > 125 ? -1 : s.speed < 112 ? 0.5 : 0;

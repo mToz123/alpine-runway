@@ -44,20 +44,48 @@ FG.COURSE_END_Z = 10100;
 FG.START_ALT_FT = 420;
 FG.START_SPEED_KT = 150;
 
+// --- Fuel & damage ------------------------------------------------------
+FG.FUEL_MAX = 100; // percent
+FG.FUEL_START = 100;
+FG.FUEL_IDLE_BURN = 0.35; // percent per second at throttle 0
+FG.FUEL_THROTTLE_BURN = 0.55; // extra percent per second at full throttle
+FG.FUEL_RING_BONUS = 3; // percent refuelled per ring flown through
+FG.FUEL_LOW = 25; // warning below this
+FG.FUEL_BONUS_PER_POINT = 3; // landing bonus points per fuel percent left
+FG.OVERSPEED_KT = 235; // above this the airframe takes damage
+FG.DAMAGE_OVERSPEED_RATE = 8; // damage percent per second over the limit
+FG.DAMAGE_SCRAPE_RATE = 25; // damage percent per second scraping terrain
+FG.SCRAPE_CLEARANCE_FT = 25; // below this clearance, fast flight scrapes
+FG.HARD_LANDING_VS_FPS = -12; // faster sink than this at touchdown = hard
+FG.HARD_LANDING_DAMAGE = 25;
+FG.LANDING_POINTS_HARD = 250;
+
+// --- Camera / feel ------------------------------------------------------
+FG.PLANE_SCALE = 1.35; // chase-view aircraft size
+FG.FOV_KICK_DEG = 6; // extra field of view at top speed
+FG.FOV_KICK_SPEED_KT = 160; // speed where the kick starts
+FG.SPEED_LINES_KT = 205; // speed lines show above this
+FG.SHAKE_SECONDS = 0.6; // camera shake after touchdown / crash
+
 // --- Scoring ------------------------------------------------------------
 FG.RING_POINTS = 100;
 FG.CLOSE_POINTS = 25;
 FG.LANDING_POINTS = 500;
 
 // --- Look ----------------------------------------------------------------
-FG.SKY_TOP = '#16233f';
-FG.SKY_MID = '#3d5a7d';
-FG.SKY_HORIZON = '#e8825a';
+FG.SKY_TOP = '#1a2350';
+FG.SKY_MID = '#4a4a86';
+FG.SKY_HORIZON = '#ff9a5c';
+FG.SKY_HAZE = '#ffb37a';
 FG.SUN_COLOR = '#ffd9a0';
 FG.GRASS_DARK = '#2e5d33';
 FG.GRASS_LIGHT = '#4a7d3a';
 FG.FIELD_A = '#5d8a3c';
 FG.FIELD_B = '#7a9a44';
+FG.FIELD_WHEAT = '#a8944f';
+FG.FIELD_PLOWED = '#6e5138';
+FG.FIELD_MEADOW = '#4f7d46';
+FG.ROAD_COLOR = '#6b5a44';
 FG.ROCK = '#6b6f78';
 FG.SNOW = '#e8ecf2';
 FG.RUNWAY_ASPHALT = '#2b2e35';

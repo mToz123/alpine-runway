@@ -6,6 +6,8 @@
 
 Alpine Runway — an original chase-view flight game: fly a mountain valley at sunset, thread 10 glowing rings, then set the plane down on the runway. Keyboard and mouse controls, a real flight model (stall, crash, landing), and a full HUD with altitude, speed and heading.
 
+Fuel and damage turn every sortie into decisions: throttle burns fuel, each ring refuels +3%, and the fuel left at touchdown pays a bonus. Over 235 knots the airframe takes damage, scraping terrain hurts, and a hard landing costs points — land clean or don't land at all.
+
 ## Run it
 
 ```sh
