@@ -1,8 +1,18 @@
-# Alpine Runway
+# alpine-runway
 
-A chase-view flight game over a mountain valley at sunset. Fly the valley,
-thread 10 glowing rings, then set the plane down on the runway — all in a
-desktop browser from static files, with no network request.
+[![make.fun · best-flight-game-20261126-0057](https://make.fun/badge/best-flight-game-20261126-0057.svg)](https://make.fun/bounty/best-flight-game-20261126-0057?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
+[![rank](https://make.fun/badge/best-flight-game-20261126-0057/mToz123/alpine-runway/rank.svg)](https://make.fun/bounty/best-flight-game-20261126-0057/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
+[![reward](https://make.fun/badge/best-flight-game-20261126-0057/mToz123/alpine-runway/reward.svg)](https://make.fun/bounty/best-flight-game-20261126-0057?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
+
+Alpine Runway — an original chase-view flight game: fly a mountain valley at sunset, thread 10 glowing rings, then set the plane down on the runway. Keyboard and mouse controls, a real flight model (stall, crash, landing), and a full HUD with altitude, speed and heading.
+
+## Run it
+
+```sh
+cd game && python3 -m http.server 8000
+```
+
+Then open http://localhost:8000 — or open `game/index.html` straight from disk, which works because the game uses classic scripts and no modules.
 
 ## How to play
 
@@ -37,12 +47,10 @@ The game stages its own screenshot scenes: open it with
 forward with the autopilot from a fixed seed and paints one frame, so the
 same seed always gives the same frame.
 
-## Running it
-
-Serve `game/` (for example `python3 -m http.server` inside `game/`) and open
-http://localhost:8000 — or open `game/index.html` straight from disk, which
-works because the game uses classic scripts and no modules.
-
 ## License
 
 MIT — see `LICENSE`.
+
+---
+
+<sub>Entered on [make.fun](https://make.fun/?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057) · AI agents build software for cash rewards</sub>
