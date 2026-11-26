@@ -7,6 +7,7 @@ FG.canvas = document.getElementById('game');
 FG.ctx = FG.canvas.getContext('2d');
 FG.state = FG.newState(1);
 FG.paused = false;
+FG.rotatePaused = false; // true while a touch device is held portrait
 FG.lastFrame = 0;
 FG.accumulator = 0;
 FG.STEP = 1 / 60;
@@ -56,7 +57,11 @@ FG.updateSmoke = function updateSmoke(s, dt) {
 };
 
 FG.resizeCanvas = function resizeCanvas() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  // Cap 2: a high-DPI phone (devicePixelRatio 2.5–3) renders the canvas
+  // near its physical pixels instead of the old 1.5 cap, which left the
+  // frame visibly soft once it was upscaled to the screen. Above 2 the
+  // fill cost grows faster than the sharpness a player can see.
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = FG.canvas.clientWidth || window.innerWidth;
   const h = FG.canvas.clientHeight || window.innerHeight;
   FG.canvas.width = Math.round(w * dpr);
@@ -111,14 +116,10 @@ FG.toLogical = function toLogical(clientX, clientY) {
   return { x: (px - ox) / scale, y: (py - oy) / scale };
 };
 
-FG.frame = function frame(now) {
-  requestAnimationFrame(FG.frame);
-  if (FG.paused) {
-    FG.lastFrame = now;
-    return;
-  }
-  const dt = Math.min(0.1, (now - FG.lastFrame) / 1000 || 0);
-  FG.lastFrame = now;
+// One fixed simulation step of the live game: the screens, the flight,
+// the rollout after touchdown, the smoke and the shake. The frame loop
+// below calls this in FG.STEP slices, never with a raw variable dt.
+FG.stepFrame = function stepFrame(dt) {
   const s = FG.state;
   if (s.status === 'title') {
     // Attract mode: the autopilot flies the valley behind the title.
@@ -167,7 +168,32 @@ FG.frame = function frame(now) {
   }
   FG.updateSmoke(s, dt);
   if (FG.shake > 0) FG.shake = Math.max(0, FG.shake - dt * 1.6);
-  FG.paint();
+};
+
+// The frame loop: fixed-step simulation, so the flight feels the same
+// on a 60 Hz desktop, a 90/120 Hz phone and a phone that drops frames.
+// A variable dt made the motion uneven whenever a frame arrived late;
+// the accumulator steps the world in exact 1/60 s slices instead (at
+// most 5 a frame — a longer hitch drops the backlog rather than
+// spiralling), and paints only when a step actually ran.
+FG.frame = function frame(now) {
+  requestAnimationFrame(FG.frame);
+  if (FG.paused || FG.rotatePaused) {
+    FG.lastFrame = now;
+    FG.accumulator = 0;
+    return;
+  }
+  const dt = Math.min(0.1, (now - FG.lastFrame) / 1000 || 0);
+  FG.lastFrame = now;
+  FG.accumulator += dt;
+  let steps = 0;
+  while (FG.accumulator >= FG.STEP && steps < 5) {
+    FG.stepFrame(FG.STEP);
+    FG.accumulator -= FG.STEP;
+    steps += 1;
+  }
+  if (steps === 5) FG.accumulator = 0;
+  if (steps > 0) FG.paint();
 };
 
 FG.startGame = function startGame(missionId) {
@@ -189,22 +215,39 @@ window.addEventListener('keydown', (e) => {
   else if (FG.state.status === 'title' && e.code === 'Digit2') FG.startGame('time-trial');
   else if (FG.state.status === 'title' && e.code === 'Digit3') FG.startGame('fuel-run');
 });
-FG.canvas.addEventListener('mousedown', (e) => {
-  if (FG.state.status === 'title') {
-    // A click on a mission row flies that mission; anywhere else flies
-    // the mission the title screen has lit.
-    const p = FG.toLogical(e.clientX, e.clientY);
-    const menu = FG.titleMenu || [];
-    for (let i = 0; i < menu.length; i += 1) {
-      const r = menu[i];
-      if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
-        FG.startGame(r.id);
-        return;
-      }
+// Pick a mission from a pointer position on the title screen: a click
+// on a mission row flies that mission; anywhere else flies the mission
+// the title screen has lit. Shared by the mouse and the touch paths so
+// a tap and a click can never disagree.
+FG.pickMission = function pickMission(clientX, clientY) {
+  if (FG.state.status !== 'title') return;
+  const p = FG.toLogical(clientX, clientY);
+  const menu = FG.titleMenu || [];
+  for (let i = 0; i < menu.length; i += 1) {
+    const r = menu[i];
+    if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
+      FG.startGame(r.id);
+      return;
     }
-    FG.startGame();
   }
+  FG.startGame();
+};
+FG.canvas.addEventListener('mousedown', (e) => {
+  FG.pickMission(e.clientX, e.clientY);
 });
+
+// Portrait on a touch device: this game is landscape. Held portrait the
+// whole 1280x720 frame shrinks to a thin strip and the HUD text turns
+// unreadable — that is what a phone showed before. So portrait shows a
+// rotate hint instead, and pauses the flight while it is up, so the
+// plane never crashes while the player turns the phone. Desktop is
+// untouched: without a touch device there is no hint and no pause.
+FG.applyOrientation = function applyOrientation() {
+  const portrait = window.innerHeight > window.innerWidth;
+  const want = FG.isTouch && portrait;
+  document.documentElement.classList.toggle('portrait', want);
+  FG.rotatePaused = want;
+};
 
 // --- Screenshot scenes ----------------------------------------------------
 // Run the real rules forward with the autopilot and paint the frame.
@@ -259,8 +302,20 @@ FG.stageShot = function stageShot(name, seed) {
 
 FG.boot = function boot() {
   FG.resizeCanvas();
-  window.addEventListener('resize', FG.resizeCanvas);
+  const onResize = () => {
+    FG.resizeCanvas();
+    FG.applyOrientation();
+  };
+  window.addEventListener('resize', onResize);
+  window.addEventListener('orientationchange', onResize);
   FG.inputAttach(FG.canvas);
+  // Touch devices get the `touch` class (the CSS gate for the on-screen
+  // buttons and hint) and the button wiring; desktop never sees either.
+  if (FG.isTouch) {
+    document.documentElement.classList.add('touch');
+    FG.inputAttachTouchButtons();
+  }
+  FG.applyOrientation();
   const params = new URLSearchParams(window.location.search);
   const shot = params.get('shot');
   const seed = Number(params.get('seed') || '1') || 1;

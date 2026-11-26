@@ -146,6 +146,6 @@ FG.drawCockpitPanel = function drawCockpitPanel(ctx, s) {
   FG.text(ctx, `${Math.round(s.throttle * 100)}%`, qx + 26, H - 132, 13, '#ffffff');
   // Mission name, left of the panel, and the way back to chase view.
   FG.text(ctx, s.missionDef.name, 30, H - 108, 20, FG.HUD_AMBER);
-  FG.text(ctx, 'C — CHASE VIEW', 30, H - 80, 14, FG.HUD_CYAN);
+  FG.text(ctx, FG.isTouch ? 'TAP COCKPIT — CHASE VIEW' : 'C — CHASE VIEW', 30, H - 80, 14, FG.HUD_CYAN);
   FG.text(ctx, s.missionDef.tagline, 30, H - 56, 13, 'rgba(255,255,255,0.65)');
 };

@@ -969,17 +969,24 @@ FG.drawTitle = function drawTitle(ctx, s) {
     FG.text(ctx, m.tagline, W / 2 - 268, rowY + 38, 14, FG.HUD_CYAN);
     FG.titleMenu.push({ id: m.id, x: W / 2 - 330, y: rowY, w: 660, h: 48 });
   });
-  // Controls.
+  // Controls. On a touch device the keys do not exist, so the panel
+  // names the touch controls instead — same panel, same place.
   FG.panel(ctx, W / 2 - 330, menuY + menuH + 14, 660, 118);
-  FG.text(ctx, 'ARROWS / WASD — PITCH & BANK      MOUSE — STEER', W / 2, menuY + menuH + 46, 18, '#ffffff', 'center');
-  FG.text(ctx, 'SHIFT / CTRL — THROTTLE UP / DOWN      WHEEL — THROTTLE', W / 2, menuY + menuH + 78, 18, '#ffffff', 'center');
-  FG.text(ctx, 'R — RESTART      P — PAUSE      M — SOUND      C — COCKPIT VIEW', W / 2, menuY + menuH + 108, 18, '#ffffff', 'center');
+  if (FG.isTouch) {
+    FG.text(ctx, 'DRAG — STEER      HOLD THR+ / THR- — THROTTLE', W / 2, menuY + menuH + 46, 18, '#ffffff', 'center');
+    FG.text(ctx, 'BUTTONS BELOW: PAUSE  •  RESTART  •  COCKPIT VIEW', W / 2, menuY + menuH + 78, 18, '#ffffff', 'center');
+    FG.text(ctx, 'TAP A MISSION TO FLY — PUTAR HP KE LANDSCAPE', W / 2, menuY + menuH + 108, 18, '#ffffff', 'center');
+  } else {
+    FG.text(ctx, 'ARROWS / WASD — PITCH & BANK      MOUSE — STEER', W / 2, menuY + menuH + 46, 18, '#ffffff', 'center');
+    FG.text(ctx, 'SHIFT / CTRL — THROTTLE UP / DOWN      WHEEL — THROTTLE', W / 2, menuY + menuH + 78, 18, '#ffffff', 'center');
+    FG.text(ctx, 'R — RESTART      P — PAUSE      M — SOUND      C — COCKPIT VIEW', W / 2, menuY + menuH + 108, 18, '#ffffff', 'center');
+  }
   if (FG.bestScore > 0) {
     FG.text(ctx, `BEST SCORE  ${FG.bestScore}`, W / 2, menuY + menuH + 148, 18, FG.HUD_AMBER, 'center');
   }
   const pulse = 0.65 + 0.35 * Math.sin(s.time * 4);
   ctx.globalAlpha = pulse;
-  FG.text(ctx, 'CLICK A MISSION OR PRESS ENTER TO FLY', W / 2, H * 0.92, 26, '#ffffff', 'center');
+  FG.text(ctx, FG.isTouch ? 'TAP A MISSION TO FLY' : 'CLICK A MISSION OR PRESS ENTER TO FLY', W / 2, H * 0.92, 26, '#ffffff', 'center');
   ctx.globalAlpha = 1;
 };
 
@@ -1015,5 +1022,6 @@ FG.drawEnd = function drawEnd(ctx, s, title, sub, color) {
     FG.text(ctx, `BEST  ${FG.bestScore}`, W / 2, H * 0.38 + 28 + 30 * 5 + 36, 18, FG.HUD_CYAN, 'center');
   }
   FG.text(ctx, `TIME ${FG.pad(Math.floor(s.time / 60), 2)}:${FG.pad(Math.floor(s.time % 60), 2)}`, W / 2, H * 0.72, 20, FG.HUD_CYAN, 'center');
-  FG.text(ctx, 'PRESS R TO FLY AGAIN', W / 2, H * 0.8, 24, '#ffffff', 'center');
+  // A touch device has no R key: the restart is the on-screen button.
+  FG.text(ctx, FG.isTouch ? 'TAP RESTART BELOW TO FLY AGAIN' : 'PRESS R TO FLY AGAIN', W / 2, H * 0.8, 24, '#ffffff', 'center');
 };
