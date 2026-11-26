@@ -654,12 +654,14 @@ FG.pad = function pad(n, len) {
 FG.drawHUD = function drawHUD(ctx, s) {
   const W = FG.VIEW_W;
   const H = FG.VIEW_H;
-  // Top-left: altitude, speed, vertical speed.
-  FG.panel(ctx, 18, 16, 218, 108);
+  // Top-left: altitude, speed, vertical speed, wind.
+  FG.panel(ctx, 18, 16, 218, 132);
   FG.text(ctx, 'ALT', 34, 38, 15, FG.HUD_CYAN);
   FG.text(ctx, `${FG.pad(s.alt, 5)} FT`, 34, 66, 26, '#ffffff');
   FG.text(ctx, 'SPD', 34, 96, 15, FG.HUD_CYAN);
   FG.text(ctx, `${FG.pad(s.speed, 3)} KT`, 118, 96, 20, '#ffffff');
+  FG.text(ctx, 'WIND', 34, 124, 15, FG.HUD_CYAN);
+  FG.text(ctx, `${FG.pad(Math.round(s.windKt), 2)} KT →`, 118, 124, 20, '#ffffff');
   // Top-centre: compass tape on the left, current heading on the right.
   FG.panel(ctx, W / 2 - 220, 16, 440, 56);
   const hdg = ((s.heading % 360) + 360) % 360;
@@ -720,73 +722,30 @@ FG.drawHUD = function drawHUD(ctx, s) {
   FG.text(ctx, 'SCORE', W - 220, 188, 15, FG.HUD_CYAN);
   FG.text(ctx, String(s.score), W - 148, 188, 20, '#ffffff');
   // Bottom-left: attitude indicator (lit instruments), bigger, with a
-  // pitch ladder and a glass dome.
-  const ax = 86;
-  const ay = H - 94;
-  const ar = 70;
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(ax, ay, ar, 0, Math.PI * 2);
-  ctx.clip();
-  ctx.fillStyle = '#274b7a';
-  ctx.fillRect(ax - ar, ay - ar, ar * 2, ar * 2);
-  ctx.save();
-  ctx.translate(ax, ay);
-  ctx.rotate(FG.deg2rad(-s.roll));
-  ctx.translate(0, FG.clamp(s.pitch, -20, 20) * 2.1);
-  ctx.fillStyle = '#274b7a';
-  ctx.fillRect(-ar - 10, -ar - 10, (ar + 10) * 2, ar + 10);
-  ctx.fillStyle = '#7a5a2e';
-  ctx.fillRect(-ar - 10, 0, (ar + 10) * 2, ar + 10);
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-ar - 10, 0);
-  ctx.lineTo(ar + 10, 0);
-  ctx.stroke();
-  // Pitch ladder: 10° and 20° rungs above and below the horizon.
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
-  [-20, -10, 10, 20].forEach((deg) => {
-    const y = -deg * 2.1;
-    const half = deg % 20 === 0 ? 26 : 16;
-    ctx.beginPath();
-    ctx.moveTo(-half, y);
-    ctx.lineTo(half, y);
-    ctx.stroke();
-  });
-  ctx.restore();
-  ctx.strokeStyle = FG.HUD_AMBER;
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(ax - 32, ay);
-  ctx.lineTo(ax - 10, ay);
-  ctx.moveTo(ax + 10, ay);
-  ctx.lineTo(ax + 32, ay);
-  ctx.beginPath();
-  ctx.arc(ax, ay + 5, 6, 0, Math.PI * 2);
-  ctx.stroke();
-  // Glass dome: light falling across the top of the instrument.
-  const dome = ctx.createRadialGradient(ax - 24, ay - 26, 4, ax - 24, ay - 26, ar * 1.2);
-  dome.addColorStop(0, 'rgba(255,255,255,0.22)');
-  dome.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = dome;
-  ctx.fillRect(ax - ar, ay - ar, ar * 2, ar * 2);
-  ctx.restore();
-  ctx.strokeStyle = 'rgba(143,245,255,0.6)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(ax, ay, ar, 0, Math.PI * 2);
-  ctx.stroke();
-  FG.text(ctx, 'ATT', ax, ay + ar + 16, 12, FG.HUD_CYAN, 'center');
-  // Bottom-right: rings + time.
-  FG.panel(ctx, W - 236, H - 96, 218, 78);
+  // pitch ladder and a glass dome. In cockpit view the big panel ball
+  // replaces it, so the same instrument is never drawn twice.
+  if (!FG.cockpit) {
+    FG.drawAttitude(ctx, 86, H - 94, 70, s);
+    FG.text(ctx, 'ATT', 86, H - 94 + 70 + 16, 12, FG.HUD_CYAN, 'center');
+  }
+  // Bottom-right: mission + rings + time. On Time Trial the clock counts
+  // down instead of the elapsed time, and turns red under 30 seconds.
+  FG.panel(ctx, W - 236, H - 122, 218, 104);
+  FG.text(ctx, 'MISSION', W - 220, H - 100, 15, FG.HUD_CYAN);
+  FG.text(ctx, s.missionDef.name, W - 148, H - 100, 15, FG.HUD_AMBER);
   FG.text(ctx, 'RINGS', W - 220, H - 74, 15, FG.HUD_CYAN);
-  FG.text(ctx, `${s.ringsPassed}/${FG.RING_COUNT}`, W - 148, H - 74, 20, '#ffffff');
-  const mins = Math.floor(s.time / 60);
-  const secs = Math.floor(s.time % 60);
-  FG.text(ctx, 'TIME', W - 220, H - 42, 15, FG.HUD_CYAN);
-  FG.text(ctx, `${FG.pad(mins, 2)}:${FG.pad(secs, 2)}`, W - 148, H - 42, 20, '#ffffff');
+  FG.text(ctx, `${s.ringsPassed}/${s.ringCount}`, W - 148, H - 74, 20, '#ffffff');
+  if (s.clock !== null) {
+    const cmins = Math.floor(s.clock / 60);
+    const csecs = Math.floor(s.clock % 60);
+    FG.text(ctx, 'CLOCK', W - 220, H - 42, 15, FG.HUD_CYAN);
+    FG.text(ctx, `${FG.pad(cmins, 2)}:${FG.pad(csecs, 2)}`, W - 148, H - 42, 20, s.clock < 30 ? FG.HUD_RED : '#ffffff');
+  } else {
+    const mins = Math.floor(s.time / 60);
+    const secs = Math.floor(s.time % 60);
+    FG.text(ctx, 'TIME', W - 220, H - 42, 15, FG.HUD_CYAN);
+    FG.text(ctx, `${FG.pad(mins, 2)}:${FG.pad(secs, 2)}`, W - 148, H - 42, 20, '#ffffff');
+  }
   // Next-target readout + edge chevron, only while flying.
   if (s.status === 'flying') {
     const target = FG.nextTarget(s);
@@ -829,7 +788,9 @@ FG.drawHUD = function drawHUD(ctx, s) {
     ctx,
     target.ring ? `NEXT RING  ${distM} M` : `RUNWAY  ${distM} M — LAND!`,
     W / 2,
-    H - 34,
+    // In cockpit view the panel attitude sits at the bottom centre, so
+    // the readout moves up above the glareshield instead of behind it.
+    FG.cockpit ? H - 180 : H - 34,
     17,
     target.ring ? FG.HUD_CYAN : FG.HUD_GREEN,
     'center',
@@ -887,7 +848,9 @@ FG.drawSpeedLines = function drawSpeedLines(ctx, s) {
   ctx.restore();
 };
 
-// Full frame: world then HUD, plus the title / end screens.
+// Full frame: world then HUD, plus the title / end screens. In cockpit
+// view the chase aircraft and its shadow are gone: the cockpit frame goes
+// under the HUD and the panel instruments on top of it.
 FG.drawFrame = function drawFrame(ctx, s) {
   const project = FG.projector(s);
   FG.drawSky(ctx, s, project);
@@ -896,16 +859,87 @@ FG.drawFrame = function drawFrame(ctx, s) {
   FG.drawGround(ctx, s, project);
   FG.drawTown(ctx, s, project);
   FG.drawRunway(ctx, s, project);
+  FG.drawWindsock(ctx, s, project);
   FG.drawClouds(ctx, s, project);
   FG.drawRings(ctx, s, project);
-  FG.drawPlaneShadow(ctx, s);
+  if (!FG.cockpit) FG.drawPlaneShadow(ctx, s);
+  FG.drawSmoke(ctx, s, project);
   FG.drawSpeedLines(ctx, s);
-  FG.drawPlane(ctx, s);
+  if (FG.cockpit) FG.drawCockpitFrame(ctx, s);
+  else FG.drawPlane(ctx, s);
   FG.drawHUD(ctx, s);
+  if (FG.cockpit) FG.drawCockpitPanel(ctx, s);
   if (s.status === 'title') FG.drawTitle(ctx, s);
   else if (s.status === 'crashed') FG.drawEnd(ctx, s, 'CRASHED', s.statusReason, FG.HUD_RED);
   else if (s.status === 'landed') FG.drawEnd(ctx, s, s.statusReason === 'HARD LANDING — AIRFRAME DAMAGED' ? 'HARD LANDING' : 'TOUCHDOWN!', s.statusReason, FG.HUD_GREEN);
   else if (s.status === 'done') FG.drawEnd(ctx, s, s.statusReason, 'PRESS R TO FLY AGAIN', FG.HUD_CYAN);
+};
+
+// The windsock by the runway threshold: a pole with an orange sock that
+// streams downwind and droops when the air is calm, so the crosswind the
+// flight model applies is visible before the pilot commits to final.
+FG.drawWindsock = function drawWindsock(ctx, s, project) {
+  const wx = -FG.RUNWAY_HALF_W - 18;
+  const wz = FG.RUNWAY_Z0 + 80;
+  if (wz < s.z - 60 || wz > s.z + 3400) return;
+  const base = project(wx, FG.RUNWAY_ELEV_FT, wz);
+  const top = project(wx, FG.RUNWAY_ELEV_FT + 40, wz);
+  if (!base || !top) return;
+  ctx.strokeStyle = '#d8d8d8';
+  ctx.lineWidth = Math.max(1, 200 / top.d);
+  ctx.beginPath();
+  ctx.moveTo(base.x, base.y);
+  ctx.lineTo(top.x, top.y);
+  ctx.stroke();
+  // Downwind on screen: project a point 24 m downwind of the pole top.
+  const down = project(wx + 24, FG.RUNWAY_ELEV_FT + 40, wz);
+  if (!down) return;
+  let dx = down.x - top.x;
+  let dy = down.y - top.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 1) return;
+  dx /= len;
+  dy /= len;
+  // The sock streams out with the wind and droops when it is calm.
+  const lift = FG.clamp(s.windKt / 24, 0.15, 1);
+  const sockLen = 8 * top.scale * (0.4 + 0.6 * lift);
+  const tipX = top.x + dx * sockLen;
+  const tipY = top.y + dy * sockLen + (1 - lift) * sockLen * 0.45;
+  // A tapered sock, orange with a white band, fat at the pole.
+  const perpX = -dy;
+  const perpY = dx;
+  ctx.fillStyle = '#ff7a2e';
+  ctx.beginPath();
+  ctx.moveTo(top.x + perpX * 3, top.y + perpY * 3);
+  ctx.lineTo(tipX + perpX * 1, tipY + perpY * 1);
+  ctx.lineTo(tipX - perpX * 1, tipY - perpY * 1);
+  ctx.lineTo(top.x - perpX * 3, top.y - perpY * 3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(top.x + dx * sockLen * 0.45 + perpX * 2.4, top.y + dy * sockLen * 0.45 + perpY * 2.4);
+  ctx.lineTo(tipX + perpX * 1, tipY + perpY * 1);
+  ctx.lineTo(tipX - perpX * 1, tipY - perpY * 1);
+  ctx.lineTo(top.x + dx * sockLen * 0.45 - perpX * 2.4, top.y + dy * sockLen * 0.45 - perpY * 2.4);
+  ctx.closePath();
+  ctx.fill();
+};
+
+// Touchdown and crash smoke: grey puffs that hang in the air where the
+// wheels met the ground, growing and fading, so a landing reads.
+FG.drawSmoke = function drawSmoke(ctx, s, project) {
+  for (let i = 0; i < s.smoke.length; i += 1) {
+    const p = s.smoke[i];
+    const age = 1 - p.life / p.maxLife;
+    const q = project(p.x, p.y, p.z);
+    if (!q) continue;
+    const r = Math.max(2, q.scale * p.size * (0.6 + age));
+    ctx.fillStyle = `rgba(210,205,195,${(0.5 * (1 - age)).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(q.x, q.y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
 };
 
 FG.drawTitle = function drawTitle(ctx, s) {
@@ -913,16 +947,39 @@ FG.drawTitle = function drawTitle(ctx, s) {
   const H = FG.VIEW_H;
   ctx.fillStyle = 'rgba(6,12,24,0.45)';
   ctx.fillRect(0, 0, W, H);
-  FG.text(ctx, 'ALPINE RUNWAY', W / 2, H * 0.3, 64, '#ffffff', 'center');
-  FG.text(ctx, 'FLY THE VALLEY  •  THREAD 10 RINGS  •  LAND ON THE RUNWAY', W / 2, H * 0.3 + 52, 20, FG.HUD_AMBER, 'center');
-  FG.panel(ctx, W / 2 - 330, H * 0.46, 660, 150);
-  FG.text(ctx, 'ARROWS / WASD — PITCH & BANK      MOUSE — STEER', W / 2, H * 0.46 + 34, 18, '#ffffff', 'center');
-  FG.text(ctx, 'SHIFT / CTRL — THROTTLE UP / DOWN      WHEEL — THROTTLE', W / 2, H * 0.46 + 66, 18, '#ffffff', 'center');
-  FG.text(ctx, 'R — RESTART      P — PAUSE      M — SOUND', W / 2, H * 0.46 + 98, 18, '#ffffff', 'center');
-  FG.text(ctx, 'RINGS REFUEL +3%  •  FUEL LEFT PAYS A BONUS  •  OVER 235 KT HURTS', W / 2, H * 0.46 + 128, 16, FG.HUD_CYAN, 'center');
+  FG.text(ctx, 'ALPINE RUNWAY', W / 2, H * 0.24, 64, '#ffffff', 'center');
+  FG.text(ctx, 'FLY THE VALLEY  •  THREAD THE RINGS  •  LAND ON THE RUNWAY', W / 2, H * 0.24 + 52, 20, FG.HUD_AMBER, 'center');
+  // Mission menu: three missions, picked with 1/2/3 or a click. The
+  // selected one is lit; its rects are kept for the click handler.
+  const menuY = H * 0.36;
+  const menuH = 178;
+  FG.panel(ctx, W / 2 - 330, menuY, 660, menuH);
+  FG.titleMenu = [];
+  FG.MISSIONS.forEach((m, i) => {
+    const rowY = menuY + 12 + i * 56;
+    const selected = FG.selectedMission === m.id;
+    if (selected) {
+      ctx.fillStyle = 'rgba(255,176,46,0.14)';
+      ctx.fillRect(W / 2 - 318, rowY, 636, 48);
+      ctx.fillStyle = FG.HUD_AMBER;
+      ctx.fillRect(W / 2 - 318, rowY, 5, 48);
+    }
+    FG.text(ctx, `${m.num}`, W / 2 - 296, rowY + 24, 22, selected ? FG.HUD_AMBER : '#ffffff', 'center');
+    FG.text(ctx, m.name, W / 2 - 268, rowY + 16, 19, selected ? FG.HUD_AMBER : '#ffffff');
+    FG.text(ctx, m.tagline, W / 2 - 268, rowY + 38, 14, FG.HUD_CYAN);
+    FG.titleMenu.push({ id: m.id, x: W / 2 - 330, y: rowY, w: 660, h: 48 });
+  });
+  // Controls.
+  FG.panel(ctx, W / 2 - 330, menuY + menuH + 14, 660, 118);
+  FG.text(ctx, 'ARROWS / WASD — PITCH & BANK      MOUSE — STEER', W / 2, menuY + menuH + 46, 18, '#ffffff', 'center');
+  FG.text(ctx, 'SHIFT / CTRL — THROTTLE UP / DOWN      WHEEL — THROTTLE', W / 2, menuY + menuH + 78, 18, '#ffffff', 'center');
+  FG.text(ctx, 'R — RESTART      P — PAUSE      M — SOUND      C — COCKPIT VIEW', W / 2, menuY + menuH + 108, 18, '#ffffff', 'center');
+  if (FG.bestScore > 0) {
+    FG.text(ctx, `BEST SCORE  ${FG.bestScore}`, W / 2, menuY + menuH + 148, 18, FG.HUD_AMBER, 'center');
+  }
   const pulse = 0.65 + 0.35 * Math.sin(s.time * 4);
   ctx.globalAlpha = pulse;
-  FG.text(ctx, 'PRESS ENTER OR CLICK TO FLY', W / 2, H * 0.92, 26, '#ffffff', 'center');
+  FG.text(ctx, 'CLICK A MISSION OR PRESS ENTER TO FLY', W / 2, H * 0.92, 26, '#ffffff', 'center');
   ctx.globalAlpha = 1;
 };
 
@@ -935,12 +992,13 @@ FG.drawEnd = function drawEnd(ctx, s, title, sub, color) {
   ctx.fillRect(0, 0, W, H);
   FG.text(ctx, title, W / 2, H * 0.26, 56, color, 'center');
   FG.text(ctx, sub, W / 2, H * 0.26 + 46, 20, '#ffffff', 'center');
+  FG.text(ctx, `${s.missionDef.name}  •  WIND ${Math.round(s.windKt)} KT`, W / 2, H * 0.26 + 76, 16, FG.HUD_CYAN, 'center');
   FG.panel(ctx, W / 2 - 250, H * 0.38, 500, 210);
   const rows = [
     ['RINGS', `${s.ringsPassed} × ${FG.RING_POINTS}`, `+${s.scoreRings}`],
     ['CLOSE PASSES', '', `+${s.scoreClose}`],
     ['LANDING', '', `+${s.scoreLanding}`],
-    ['FUEL BONUS', `${Math.round(s.fuel)}% LEFT`, `+${s.scoreFuel}`],
+    [s.bonusLabel, s.missionDef.clockStart !== null ? `${Math.round(s.clock)} S LEFT` : `${Math.round(s.fuel)}% LEFT`, `+${s.scoreBonus}`],
     ['DAMAGE', `${Math.round(s.damage)}%`, ''],
   ];
   let y = H * 0.38 + 28;
@@ -951,6 +1009,11 @@ FG.drawEnd = function drawEnd(ctx, s, title, sub, color) {
     y += 30;
   });
   FG.text(ctx, `TOTAL  ${s.score}`, W / 2, H * 0.38 + 28 + 30 * 5 + 6, 24, FG.HUD_AMBER, 'center');
+  if (s.newBest) {
+    FG.text(ctx, '★ NEW BEST! ★', W / 2, H * 0.38 + 28 + 30 * 5 + 36, 20, FG.HUD_AMBER, 'center');
+  } else if (FG.bestScore > 0) {
+    FG.text(ctx, `BEST  ${FG.bestScore}`, W / 2, H * 0.38 + 28 + 30 * 5 + 36, 18, FG.HUD_CYAN, 'center');
+  }
   FG.text(ctx, `TIME ${FG.pad(Math.floor(s.time / 60), 2)}:${FG.pad(Math.floor(s.time % 60), 2)}`, W / 2, H * 0.72, 20, FG.HUD_CYAN, 'center');
   FG.text(ctx, 'PRESS R TO FLY AGAIN', W / 2, H * 0.8, 24, '#ffffff', 'center');
 };

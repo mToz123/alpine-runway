@@ -11,6 +11,49 @@ FG.lastFrame = 0;
 FG.accumulator = 0;
 FG.STEP = 1 / 60;
 FG.shake = 0; // camera shake after a touchdown or crash, decays per frame
+FG.selectedMission = 'ring-run'; // the mission the title screen has lit
+FG.bestScore = 0; // best score ever, localStorage with an in-memory fallback
+try {
+  FG.bestScore = Number(window.localStorage.getItem('alpine-runway-best') || '0') || 0;
+} catch (err) {
+  FG.bestScore = 0;
+}
+
+// Best score: remember a new best across visits when storage allows,
+// and always in memory for this visit.
+FG.saveBest = function saveBest(s) {
+  if (s.score > FG.bestScore) {
+    FG.bestScore = s.score;
+    s.newBest = true;
+    try {
+      window.localStorage.setItem('alpine-runway-best', String(s.score));
+    } catch (err) {
+      // No storage (file:// in some browsers): the in-memory best stands.
+    }
+  }
+};
+
+// Touchdown / crash smoke: grey puffs at the wheels that hang in the air.
+FG.spawnSmoke = function spawnSmoke(s, n, spread) {
+  for (let i = 0; i < n; i += 1) {
+    s.smoke.push({
+      x: s.x + (Math.random() - 0.5) * spread,
+      y: FG.RUNWAY_ELEV_FT + 2,
+      z: s.z - 4 - Math.random() * 10,
+      life: 1.2,
+      maxLife: 1.2,
+      size: 5 + Math.random() * 5,
+    });
+  }
+  if (s.smoke.length > 60) s.smoke.splice(0, s.smoke.length - 60);
+};
+
+FG.updateSmoke = function updateSmoke(s, dt) {
+  for (let i = s.smoke.length - 1; i >= 0; i -= 1) {
+    s.smoke[i].life -= dt;
+    if (s.smoke[i].life <= 0) s.smoke.splice(i, 1);
+  }
+};
 
 FG.resizeCanvas = function resizeCanvas() {
   const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -53,8 +96,19 @@ window.addEventListener('error', (e) => {
 });
 
 FG.resetFlight = function resetFlight() {
-  FG.state = FG.newState(FG.state.seed);
+  FG.state = FG.newState(FG.state.seed, FG.state.mission);
   FG.state.status = 'flying';
+};
+
+// Pointer position in the logical 1280x720 frame, for the title menu.
+FG.toLogical = function toLogical(clientX, clientY) {
+  const rect = FG.canvas.getBoundingClientRect();
+  const px = (clientX - rect.left) * (FG.canvas.width / rect.width);
+  const py = (clientY - rect.top) * (FG.canvas.height / rect.height);
+  const scale = Math.min(FG.canvas.width / FG.VIEW_W, FG.canvas.height / FG.VIEW_H);
+  const ox = (FG.canvas.width - FG.VIEW_W * scale) / 2;
+  const oy = (FG.canvas.height - FG.VIEW_H * scale) / 2;
+  return { x: (px - ox) / scale, y: (py - oy) / scale };
 };
 
 FG.frame = function frame(now) {
@@ -68,11 +122,15 @@ FG.frame = function frame(now) {
   const s = FG.state;
   if (s.status === 'title') {
     // Attract mode: the autopilot flies the valley behind the title.
+    // It does not burn the Time Trial clock, and it keeps the mission
+    // the player has lit when it resets.
     const saved = s.status;
     s.status = 'flying';
+    s.attract = true;
     FG.stepWorld(s, dt, FG.autopilot(s));
+    s.attract = false;
     if (s.status !== 'flying') {
-      FG.state = FG.newState(s.seed);
+      FG.state = FG.newState(s.seed, s.mission);
     } else {
       s.status = saved;
     }
@@ -81,19 +139,44 @@ FG.frame = function frame(now) {
     const input = FG.inputRead();
     const ringsBefore = s.ringsPassed;
     FG.stepWorld(s, dt, input);
-    if (s.status === 'landed' || s.status === 'crashed') FG.shake = 1;
+    if (s.status === 'landed' || s.status === 'crashed') {
+      FG.shake = 1;
+      FG.saveBest(s);
+      if (s.status === 'landed') {
+        s.rolloutT = 1.2;
+        FG.spawnSmoke(s, 12, 12);
+      } else {
+        FG.spawnSmoke(s, 18, 20);
+      }
+    } else if (s.status === 'done') {
+      FG.saveBest(s);
+    }
     if (s.ringsPassed > ringsBefore) FG.audioRing();
     if (s.status === 'crashed') FG.audioCrash();
     if (s.status === 'landed') FG.audioLand();
     FG.audioEngine(s);
+    // Stall buffet: the airframe shakes while the wing is not flying.
+    if (s.status === 'flying' && s.stall) FG.shake = Math.max(FG.shake, 0.3);
+  } else if (s.status === 'landed' && s.rolloutT > 0) {
+    // Rollout: the wheels stay on the runway a moment after touchdown,
+    // bleeding speed and puffing smoke, instead of freezing mid-air.
+    s.rolloutT -= dt;
+    s.z += Math.max(0, s.speed) * FG.KT_TO_MPS * dt;
+    s.speed = Math.max(0, s.speed - 60 * dt);
+    if (s.speed > 30 && Math.random() < 0.5) FG.spawnSmoke(s, 2, 10);
   }
+  FG.updateSmoke(s, dt);
   if (FG.shake > 0) FG.shake = Math.max(0, FG.shake - dt * 1.6);
   FG.paint();
 };
 
-FG.startGame = function startGame() {
+FG.startGame = function startGame(missionId) {
   FG.audioInit();
-  if (FG.state.status === 'title') FG.resetFlight();
+  if (FG.state.status === 'title') {
+    FG.selectedMission = missionId || FG.selectedMission;
+    FG.state = FG.newState(FG.state.seed, FG.selectedMission);
+    FG.state.status = 'flying';
+  }
 };
 
 window.addEventListener('keydown', (e) => {
@@ -101,9 +184,26 @@ window.addEventListener('keydown', (e) => {
   else if (e.code === 'KeyR') FG.resetFlight();
   else if (e.code === 'KeyP') FG.paused = !FG.paused;
   else if (e.code === 'KeyM') FG.audioToggleMute();
+  else if (e.code === 'KeyC') FG.cockpit = !FG.cockpit;
+  else if (FG.state.status === 'title' && e.code === 'Digit1') FG.startGame('ring-run');
+  else if (FG.state.status === 'title' && e.code === 'Digit2') FG.startGame('time-trial');
+  else if (FG.state.status === 'title' && e.code === 'Digit3') FG.startGame('fuel-run');
 });
-FG.canvas.addEventListener('mousedown', () => {
-  if (FG.state.status === 'title') FG.startGame();
+FG.canvas.addEventListener('mousedown', (e) => {
+  if (FG.state.status === 'title') {
+    // A click on a mission row flies that mission; anywhere else flies
+    // the mission the title screen has lit.
+    const p = FG.toLogical(e.clientX, e.clientY);
+    const menu = FG.titleMenu || [];
+    for (let i = 0; i < menu.length; i += 1) {
+      const r = menu[i];
+      if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
+        FG.startGame(r.id);
+        return;
+      }
+    }
+    FG.startGame();
+  }
 });
 
 // --- Screenshot scenes ----------------------------------------------------
@@ -128,9 +228,9 @@ FG.stageShot = function stageShot(name, seed) {
     // Final approach: the rings are done, the plane is on the glide path
     // to the runway with the course behind it.
     s.rings.forEach((ring) => { ring.passed = true; });
-    s.ringsPassed = FG.RING_COUNT;
-    s.score = FG.RING_COUNT * FG.RING_POINTS;
-    s.scoreRings = FG.RING_COUNT * FG.RING_POINTS;
+    s.ringsPassed = s.ringCount;
+    s.score = s.ringCount * FG.RING_POINTS;
+    s.scoreRings = s.ringCount * FG.RING_POINTS;
     s.fuel = 55;
     s.damage = 0;
     s.time = 85;
@@ -166,6 +266,8 @@ FG.boot = function boot() {
   const seed = Number(params.get('seed') || '1') || 1;
   FG.state = FG.newState(seed);
   if (shot) {
+    // ?view=cockpit stages the shot from the pilot's seat.
+    if (params.get('view') === 'cockpit') FG.cockpit = true;
     FG.stageShot(shot, seed);
     return; // static frame for the screenshot; no loop
   }

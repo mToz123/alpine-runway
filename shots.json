@@ -1,1 +1,1 @@
-[{"name":"1-cover.jpg","query":"?shot=cover&seed=1"},{"name":"2-ring.jpg","query":"?shot=ring&seed=1"},{"name":"3-approach.jpg","query":"?shot=approach&seed=1"},{"name":"4-title.jpg","query":"?shot=title&seed=1"}]
+[{"name":"1-cover.jpg","query":"?shot=cover&seed=1"},{"name":"2-ring.jpg","query":"?shot=ring&seed=1&view=cockpit"},{"name":"3-approach.jpg","query":"?shot=approach&seed=1"},{"name":"4-title.jpg","query":"?shot=title&seed=1"}]

@@ -40,7 +40,8 @@ FG.audioEngine = function audioEngine(s) {
   if (!a.ctx || a.muted) return;
   const target = s.status === 'flying' ? 0.05 + s.throttle * 0.06 : 0;
   a.engineGain.gain.setTargetAtTime(target, a.ctx.currentTime, 0.1);
-  a.engineOsc.frequency.setTargetAtTime(45 + s.speed * 0.35, a.ctx.currentTime, 0.1);
+  // Pitch follows speed and throttle: spooling up is heard as well as seen.
+  a.engineOsc.frequency.setTargetAtTime(45 + s.speed * 0.3 + s.throttle * 25, a.ctx.currentTime, 0.1);
 };
 
 FG.audioBeep = function audioBeep(freq, dur, type, vol, when) {

@@ -64,15 +64,23 @@ FG.terrainHeight = function terrainHeight(x, z) {
   return h;
 };
 
-// Ring positions for a seed. Rings weave across the valley and climb.
-FG.buildRings = function buildRings(seed) {
+// Wind, in knots along +x (a crosswind from the west): a steady base plus
+// slow gusts, deterministic in flight time so the autopilot and a replay
+// see the same sky.
+FG.windKt = function windKt(t) {
+  return FG.WIND_KT + FG.WIND_GUST_KT * Math.sin(t * 0.5) * Math.sin(t * 0.13 + 1.7);
+};
+
+// Ring positions for a seed and a mission. Rings weave across the valley
+// and climb; Fuel Run weaves wider and spaces them further apart.
+FG.buildRings = function buildRings(seed, mission) {
   const rand = FG.mulberry32(seed);
   const rings = [];
-  for (let i = 0; i < FG.RING_COUNT; i += 1) {
+  for (let i = 0; i < mission.ringCount; i += 1) {
     rings.push({
-      x: Math.round(200 * Math.sin(i * 1.7 + seed * 0.13) + (rand() - 0.5) * 60),
+      x: Math.round(mission.weave * Math.sin(i * 1.7 + seed * 0.13) + (rand() - 0.5) * 60),
       y: Math.round(330 + 260 * Math.sin(i * 0.9 + 0.4) + rand() * 80),
-      z: FG.RING_FIRST_Z + i * FG.RING_SPACING_Z,
+      z: mission.ringFirstZ + i * mission.ringSpacing,
       r: FG.RING_RADIUS_FT,
       passed: false,
       close: false,
@@ -81,9 +89,12 @@ FG.buildRings = function buildRings(seed) {
   return rings;
 };
 
-FG.newState = function newState(seed) {
+FG.newState = function newState(seed, missionId) {
+  const mission = FG.missionById(missionId || 'ring-run');
   return {
     seed,
+    mission: mission.id,
+    missionDef: mission,
     x: 0,
     alt: FG.START_ALT_FT,
     z: 0,
@@ -96,11 +107,15 @@ FG.newState = function newState(seed) {
     scoreRings: 0, // points from rings flown through
     scoreClose: 0, // points from close passes
     scoreLanding: 0, // points from the touchdown
-    scoreFuel: 0, // landing fuel bonus
+    scoreBonus: 0, // landing bonus: fuel left, or clock left on Time Trial
+    bonusLabel: 'FUEL BONUS',
     ringsPassed: 0,
-    fuel: FG.FUEL_START,
+    ringCount: mission.ringCount,
+    fuel: mission.fuelStart,
     damage: 0,
     fuelOut: false,
+    clock: mission.clockStart, // seconds left on Time Trial, null otherwise
+    windKt: FG.windKt(0),
     vs: 0, // vertical speed, ft/s (negative = descending)
     time: 0,
     status: 'title', // title | flying | crashed | landed | done
@@ -110,7 +125,10 @@ FG.newState = function newState(seed) {
     flash: 0, // seconds left on the ring-pass flash
     stall: false,
     terrainWarn: false,
-    rings: FG.buildRings(seed),
+    attract: false, // true while the title screen flies the plane itself
+    rolloutT: 0, // seconds of rollout left after a touchdown
+    smoke: [], // touchdown / crash smoke puffs, world coordinates
+    rings: FG.buildRings(seed, mission),
   };
 };
 
@@ -120,6 +138,21 @@ FG.stepWorld = function stepWorld(s, dt, input) {
   if (s.status !== 'flying') return;
   s.time += dt;
 
+  // Time Trial: the clock runs down and only the rings top it up. The
+  // title screen's attract flight does not burn the clock.
+  if (s.clock !== null && !s.attract) {
+    s.clock -= dt;
+    if (s.clock <= 0) {
+      s.clock = 0;
+      s.status = 'done';
+      s.statusReason = 'OUT OF TIME';
+      return;
+    }
+  }
+
+  // Wind, this instant: a real lateral force on the ground track.
+  s.windKt = FG.windKt(s.time);
+  const windMps = s.windKt * FG.KT_TO_MPS;
   // Throttle and speed. Empty tank = engine out: the throttle is forced
   // to idle and the wing glides at minimum speed toward the runway.
   if (s.fuel <= 0) {
@@ -171,7 +204,9 @@ FG.stepWorld = function stepWorld(s, dt, input) {
   const pitchRad = FG.deg2rad(s.pitch);
   const headingRad = FG.deg2rad(s.heading);
   s.z += speedMps * Math.cos(pitchRad) * Math.cos(headingRad) * dt;
-  s.x += speedMps * Math.sin(headingRad) * dt;
+  // The crosswind pushes the ground track sideways: hold a crab angle
+  // into it or drift off the line (and off the runway on final).
+  s.x += (speedMps * Math.sin(headingRad) + windMps) * dt;
   let vs = speedFps * Math.sin(pitchRad);
   if (s.stall) vs -= FG.STALL_SINK_FPS;
   if (s.pitch < 0) vs *= 1.15; // dives bite a little harder
@@ -181,8 +216,10 @@ FG.stepWorld = function stepWorld(s, dt, input) {
 
   // Terrain warning when close to the ground — but not on final, where
   // being low over the runway corridor is the whole point of landing.
+  // The corridor matches the flattened runway ground (half-width + 60 m),
+  // so a low final over the strip never reads as a terrain threat.
   const ground = FG.terrainHeight(s.x, s.z);
-  const onFinal = Math.abs(s.x) <= FG.RUNWAY_HALF_W + 6
+  const onFinal = Math.abs(s.x) <= FG.RUNWAY_HALF_W + 60
     && s.z >= FG.RUNWAY_Z0 - 400 && s.z <= FG.RUNWAY_Z1;
   s.terrainWarn = !onFinal && s.alt - ground < 120 && s.alt - ground > 0;
   if (!onFinal && s.alt - ground < FG.SCRAPE_CLEARANCE_FT && s.speed > 120) {
@@ -208,9 +245,10 @@ FG.stepWorld = function stepWorld(s, dt, input) {
         s.ringsPassed += 1;
         s.score += FG.RING_POINTS;
         s.scoreRings += FG.RING_POINTS;
-        s.fuel = Math.min(FG.FUEL_MAX, s.fuel + FG.FUEL_RING_BONUS);
+        s.fuel = Math.min(FG.FUEL_MAX, s.fuel + s.missionDef.fuelRingBonus);
+        if (s.clock !== null) s.clock += s.missionDef.clockPerRing;
         s.flash = 0.9;
-        s.message = `RING ${s.ringsPassed}/${FG.RING_COUNT}  +${FG.RING_POINTS}   FUEL +${FG.FUEL_RING_BONUS}%`;
+        s.message = `RING ${s.ringsPassed}/${s.ringCount}  +${FG.RING_POINTS}   FUEL +${s.missionDef.fuelRingBonus}%`;
         s.messageUntil = s.time + 1.6;
       } else if (d < ring.r * 1.6) {
         ring.close = true;
@@ -238,9 +276,16 @@ FG.stepWorld = function stepWorld(s, dt, input) {
     } else {
       s.statusReason = 'LANDED CLEAN';
     }
-    // Fuel left is worth points: throttle discipline pays.
-    s.scoreFuel = Math.round(s.fuel * FG.FUEL_BONUS_PER_POINT);
-    s.score += s.scoreFuel;
+    // What is left at touchdown is worth points: throttle discipline
+    // pays on Ring Run and Fuel Run; on Time Trial the clock left pays.
+    if (s.missionDef.clockStart !== null) {
+      s.scoreBonus = Math.round(s.clock * FG.CLOCK_BONUS_PER_SECOND);
+      s.bonusLabel = 'CLOCK BONUS';
+    } else {
+      s.scoreBonus = Math.round(s.fuel * FG.FUEL_BONUS_PER_POINT);
+      s.bonusLabel = 'FUEL BONUS';
+    }
+    s.score += s.scoreBonus;
     s.message = `TOUCHDOWN  +${s.scoreLanding}`;
     s.messageUntil = s.time + 3;
     return;
@@ -260,25 +305,36 @@ FG.stepWorld = function stepWorld(s, dt, input) {
   }
   if (s.z >= FG.COURSE_END_Z) {
     s.status = 'done';
-    s.statusReason = s.ringsPassed === FG.RING_COUNT ? 'COURSE COMPLETE' : 'OUT OF COURSE';
+    s.statusReason = s.ringsPassed === s.ringCount ? 'COURSE COMPLETE' : 'OUT OF COURSE';
   }
 };
 
 // The next ring the pilot should aim for (or the runway once rings are done).
+// A ring left behind is left behind: the pilot flies on to the next one
+// instead of turning back for it.
 FG.nextTarget = function nextTarget(s) {
   for (let i = 0; i < s.rings.length; i += 1) {
-    if (!s.rings[i].passed) return { x: s.rings[i].x, y: s.rings[i].y, z: s.rings[i].z, ring: true };
+    if (!s.rings[i].passed && s.rings[i].z >= s.z - 60) {
+      return { x: s.rings[i].x, y: s.rings[i].y, z: s.rings[i].z, ring: true };
+    }
   }
   return { x: 0, y: FG.RUNWAY_ELEV_FT + 40, z: (FG.RUNWAY_Z0 + FG.RUNWAY_Z1) / 2, ring: false };
 };
 
 // A simple autopilot: steer toward the next target. Used for the
 // deterministic screenshot scenes and the attract mode on the title screen.
+// It crabs into the crosswind: it aims upwind of the target by the drift
+// the wind will add over the time to get there.
 FG.autopilot = function autopilot(s) {
   const target = FG.nextTarget(s);
   const dx = target.x - s.x;
   const dz = Math.max(50, target.z - s.z);
-  const wantHeading = FG.clamp((Math.atan2(dx, dz) * 180) / Math.PI, -30, 30);
+  const windMps = FG.windKt(s.time) * FG.KT_TO_MPS;
+  const speedMps = Math.max(1, s.speed * FG.KT_TO_MPS);
+  const crab = (-Math.asin(FG.clamp(windMps / speedMps, -0.9, 0.9)) * 180) / Math.PI;
+  // Wide heading authority: the valley's rings swing far across it, and
+  // a 30° cap cannot cover the widest swings against the crosswind.
+  const wantHeading = FG.clamp((Math.atan2(dx, dz) * 180) / Math.PI, -45, 45) + crab;
   let headingErr = wantHeading - s.heading;
   if (headingErr > 180) headingErr -= 360;
   if (headingErr < -180) headingErr += 360;

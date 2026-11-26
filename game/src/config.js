@@ -67,6 +67,11 @@ FG.FOV_KICK_SPEED_KT = 160; // speed where the kick starts
 FG.SPEED_LINES_KT = 205; // speed lines show above this
 FG.SHAKE_SECONDS = 0.6; // camera shake after touchdown / crash
 
+// --- Wind -----------------------------------------------------------------
+FG.WIND_KT = 12; // steady crosswind from the west, blowing toward +x
+FG.WIND_GUST_KT = 6; // gust amplitude on top of the steady wind
+FG.CLOCK_BONUS_PER_SECOND = 2; // time-trial landing bonus per second left
+
 // --- Scoring ------------------------------------------------------------
 FG.RING_POINTS = 100;
 FG.CLOSE_POINTS = 25;
